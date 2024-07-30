@@ -4,7 +4,7 @@ import sys
 import os
 
 # Default path to meminfo
-DEFAULT_MEMINFO = "/proc/meminfo"
+DEFAULT_MEMINFO = "proc/meminfo"
 
 # Get the filename from the command-line arguments or use the default
 filename = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MEMINFO
@@ -43,4 +43,5 @@ for key in fields:
         print(f"{key: <12} {meminfo[key + ':']: >12} kB")
 
 # Print the unaccounted memory
+print("="*40)
 print(f"Unaccounted: {unaccounted_memory: >12} kB ({unaccounted_memory / (1024 * 1024):.2f} GB)")
