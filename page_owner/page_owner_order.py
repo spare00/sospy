@@ -30,7 +30,7 @@ def process_file(file_path):
                 except ValueError:
                     print(f"Skipping line due to parse error: {line.strip()}")
                     continue
-                
+
                 pages = 2 ** order
                 total_pages += pages
                 if order in order_dict:
@@ -38,9 +38,17 @@ def process_file(file_path):
                 else:
                     order_dict[order] = pages
 
+    # Print header
+    print(f"{'Order':<10} {'Pages':>10} {'Memory (KB)':>15}")
+    print("=" * 35)
+
+    # Print sorted order details
     for order, pages in sorted(order_dict.items()):
-        print("Order {:3d} {:10d} pages ({:11d} KB)".format(order, pages, pages * 4))
-    print("Total {:14d} pages ({:11d} KB)".format(total_pages, total_pages * 4))
+        print(f"{order:<10} {pages:>10} {pages * 4:>15}")
+
+    # Print total pages and memory
+    print("=" * 35)
+    print(f"{'Total':<10} {total_pages:>10} {total_pages * 4:>15}")
 
 # Process the input file
 process_file(input_file)
