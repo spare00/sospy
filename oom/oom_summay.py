@@ -9,17 +9,11 @@ def parse_log_file(filename):
     return log_data
 
 def extract_memory_info(log_data):
-    # First pattern
-    pattern1 = r'(Jul \d+ \d+:\d+:\d+ \w+ kernel: Mem-Info:)'
-    # Second pattern
-    pattern2 = r'(\w+ \d+ \d+:\d+:\d+ [\w-]+ kernel: \[\d+\.\d+\] Mem-Info:)'
+    # Pattern
+    pattern = r'(kernel: Mem-Info:)'
 
     # Try splitting using the first pattern
-    mem_info_sections = re.split(pattern1, log_data)[1:]
-
-    # If the result is empty, try the second pattern
-    if not mem_info_sections:
-        mem_info_sections = re.split(pattern2, log_data)[1:]
+    mem_info_sections = re.split(pattern, log_data)[1:]
 
     timestamps = mem_info_sections[0::2]
     mem_info_sections = mem_info_sections[1::2]
@@ -96,7 +90,7 @@ def calculate_memory_usage(memory_info):
 def print_summary(memory_summary, index, timestamp):
     print(f"Mem-Info Summary {index+1} at {timestamp}:")
     print(f"{'Category':<20} {'MB':>15} {'GB':>15}")
-    print("="*50)
+    print("="*52)
     for key, (value_mb, value_gb) in memory_summary.items():
         print(f"{key:<20} {value_mb:>15.2f} {value_gb:>15.2f}")
     print("\n")
