@@ -19,6 +19,7 @@ tzinfos = {
     "BST": gettz("Europe/London"),
     "CET": gettz("Europe/Paris"),
     "EET": gettz("Europe/Helsinki"),
+    "CEST": gettz("Europe/Berlin"),
     "EEST": gettz("Europe/Helsinki"),
     "IST": gettz("Asia/Kolkata"),
     "JST": gettz("Asia/Tokyo"),
