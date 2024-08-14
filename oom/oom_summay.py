@@ -2,6 +2,7 @@
 
 import sys
 import re
+from config import patterns, mem_info_pattern, oom_pattern
 
 def parse_log_file(filename):
     """Reads the log file and returns its contents as a string."""
@@ -14,9 +15,6 @@ def parse_log_file(filename):
 
 def extract_memory_info(log_data):
     """Extracts memory information and timestamps from log sections starting with 'Mem-Info:'."""
-    mem_info_pattern = r'(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}).*Mem-Info:'
-    oom_pattern = r'(.* invoked oom-killer:.*)'
-
     # Find all sections starting with 'Mem-Info' along with their timestamps
     mem_info_sections = re.split(mem_info_pattern, log_data)[1:]
 
@@ -24,22 +22,6 @@ def extract_memory_info(log_data):
     timestamps = [timestamp.strip() for timestamp in mem_info_sections[0::2]]
     # Extract corresponding Mem-Info sections
     mem_info_sections = mem_info_sections[1::2]
-
-    patterns = {
-        'active_anon': r'active_anon:(\d+)',
-        'inactive_anon': r'inactive_anon:(\d+)',
-        'active_file': r'active_file:(\d+)',
-        'inactive_file': r'inactive_file:(\d+)',
-        'slab_reclaimable': r'slab_reclaimable:(\d+)',
-        'slab_unreclaimable': r'slab_unreclaimable:(\d+)',
-        'shmem': r'shmem:(\d+)',
-        'pagetables': r'pagetables:(\d+)',
-        'free': r'free:(\d+)',
-        'free_pcp': r'free_pcp:(\d+)',
-        'pagecache': r'(\d+) total pagecache pages',
-        'reserved': r'(\d+) pages reserved',
-        'total_pages_ram': r'(\d+) pages RAM',  # Key indicating total memory
-    }
 
     mem_info_list = []
 
