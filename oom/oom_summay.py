@@ -115,11 +115,11 @@ def print_summary(memory_summary, index, timestamp, oom_invocation_line, show_pa
 
 def main():
     if len(sys.argv) < 2 or len(sys.argv) > 3:
-        print("Usage: oom_summary.py <log_filename> [-p]")
+        print("Usage: oom_summary.py [-p] <log_filename>")
         sys.exit(1)
 
-    log_filename = sys.argv[1]
-    show_pages = '-p' in sys.argv
+    show_pages = sys.argv[1] == '-p'
+    log_filename = sys.argv[2] if show_pages else sys.argv[1]
 
     log_data = parse_log_file(log_filename)
     mem_info_list = extract_memory_info(log_data)
