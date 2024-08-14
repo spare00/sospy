@@ -79,44 +79,41 @@ def calculate_memory_usage(memory_info):
     hugepages_surp_gb = hugepages_surp_mb / 1024
 
     memory_summary = {
-        'Total Memory': (total_memory_mb, total_memory_gb),
-        'Active Anon': ((memory_info.get('active_anon', 0) * page_size_kb) / 1024, (memory_info.get('active_anon', 0) * page_size_kb) / (1024 ** 2)),
-        'Inactive Anon': ((memory_info.get('inactive_anon', 0) * page_size_kb) / 1024, (memory_info.get('inactive_anon', 0) * page_size_kb) / (1024 ** 2)),
-        'Active File': ((memory_info.get('active_file', 0) * page_size_kb) / 1024, (memory_info.get('active_file', 0) * page_size_kb) / (1024 ** 2)),
-        'Inactive File': ((memory_info.get('inactive_file', 0) * page_size_kb) / 1024, (memory_info.get('inactive_file', 0) * page_size_kb) / (1024 ** 2)),
-        'Slab': (((memory_info.get('slab_reclaimable', 0) + memory_info.get('slab_unreclaimable', 0)) * page_size_kb) / 1024, ((memory_info.get('slab_reclaimable', 0) + memory_info.get('slab_unreclaimable', 0)) * page_size_kb) / (1024 ** 2)),
-        'Shmem': ((memory_info.get('shmem', 0) * page_size_kb) / 1024, (memory_info.get('shmem', 0) * page_size_kb) / (1024 ** 2)),
-        'Page Tables': ((memory_info.get('pagetables', 0) * page_size_kb) / 1024, (memory_info.get('pagetables', 0) * page_size_kb) / (1024 ** 2)),
-        'Free': (((memory_info.get('free', 0) + memory_info.get('free_pcp', 0)) * page_size_kb) / 1024, ((memory_info.get('free', 0) + memory_info.get('free_pcp', 0)) * page_size_kb) / (1024 ** 2)),
-        'Page Cache': ((memory_info.get('pagecache', 0) * page_size_kb) / 1024, (memory_info.get('pagecache', 0) * page_size_kb) / (1024 ** 2)),
-        'Reserved': ((memory_info.get('reserved', 0) * page_size_kb) / 1024, (memory_info.get('reserved', 0) * page_size_kb) / (1024 ** 2)),
-        'Hugepages Total': (hugepages_total_mb, hugepages_total_gb),
-        'Hugepages Free': (hugepages_free_mb, hugepages_free_gb),
-        'Hugepages Surplus': (hugepages_surp_mb, hugepages_surp_gb)
+        'Total Memory': (total_memory_mb, total_memory_gb, total_memory),
+        'Active Anon': ((memory_info.get('active_anon', 0) * page_size_kb) / 1024, (memory_info.get('active_anon', 0) * page_size_kb) / (1024 ** 2), memory_info.get('active_anon', 0)),
+        'Inactive Anon': ((memory_info.get('inactive_anon', 0) * page_size_kb) / 1024, (memory_info.get('inactive_anon', 0) * page_size_kb) / (1024 ** 2), memory_info.get('inactive_anon', 0)),
+        'Active File': ((memory_info.get('active_file', 0) * page_size_kb) / 1024, (memory_info.get('active_file', 0) * page_size_kb) / (1024 ** 2), memory_info.get('active_file', 0)),
+        'Inactive File': ((memory_info.get('inactive_file', 0) * page_size_kb) / 1024, (memory_info.get('inactive_file', 0) * page_size_kb) / (1024 ** 2), memory_info.get('inactive_file', 0)),
+        'Slab': (((memory_info.get('slab_reclaimable', 0) + memory_info.get('slab_unreclaimable', 0)) * page_size_kb) / 1024, ((memory_info.get('slab_reclaimable', 0) + memory_info.get('slab_unreclaimable', 0)) * page_size_kb) / (1024 ** 2), memory_info.get('slab_reclaimable', 0) + memory_info.get('slab_unreclaimable', 0)),
+        'Shmem': ((memory_info.get('shmem', 0) * page_size_kb) / 1024, (memory_info.get('shmem', 0) * page_size_kb) / (1024 ** 2), memory_info.get('shmem', 0)),
+        'Page Tables': ((memory_info.get('pagetables', 0) * page_size_kb) / 1024, (memory_info.get('pagetables', 0) * page_size_kb) / (1024 ** 2), memory_info.get('pagetables', 0)),
+        'Free': (((memory_info.get('free', 0) + memory_info.get('free_pcp', 0)) * page_size_kb) / 1024, ((memory_info.get('free', 0) + memory_info.get('free_pcp', 0)) * page_size_kb) / (1024 ** 2), memory_info.get('free', 0) + memory_info.get('free_pcp', 0)),
+        'Page Cache': ((memory_info.get('pagecache', 0) * page_size_kb) / 1024, (memory_info.get('pagecache', 0) * page_size_kb) / (1024 ** 2), memory_info.get('pagecache', 0)),
+        'Reserved': ((memory_info.get('reserved', 0) * page_size_kb) / 1024, (memory_info.get('reserved', 0) * page_size_kb) / (1024 ** 2), memory_info.get('reserved', 0)),
+        'Hugepages Total': (hugepages_total_mb, hugepages_total_gb, memory_info.get('hugepages_total_1048576', 0) + memory_info.get('hugepages_total_2048', 0)),
+        'Hugepages Free': (hugepages_free_mb, hugepages_free_gb, memory_info.get('hugepages_free_1048576', 0) + memory_info.get('hugepages_free_2048', 0)),
+        'Hugepages Surplus': (hugepages_surp_mb, hugepages_surp_gb, memory_info.get('hugepages_surp_1048576', 0) + memory_info.get('hugepages_surp_2048', 0))
     }
 
     return memory_summary
 
-def print_summary(memory_summary, index, timestamp, oom_invocation_line):
+def print_summary(memory_summary, index, timestamp, oom_invocation_line, show_pages):
     print(f"\nEvent: {oom_invocation_line}")
-    print(f"{'Category':<20} {'MB':>15} {'GB':>15}")
-    print("="*52)
-    for key, (value_mb, value_gb) in memory_summary.items():
-        print(f"{key:<20} {value_mb:>15.2f} {value_gb:>15.2f}")
+    if show_pages:
+        print(f"{'Category':<20} {'Pages':>10} {'MB':>15} {'GB':>15}")
+        print("="*62)
+    else:
+        print(f"{'Category':<20} {'MB':>15} {'GB':>15}")
+        print("="*52)
+
+    for key, (value_mb, value_gb, pages) in memory_summary.items():
+        if show_pages:
+            print(f"{key:<20} {pages:>10} {value_mb:>15.2f} {value_gb:>15.2f}")
+        else:
+            print(f"{key:<20} {value_mb:>15.2f} {value_gb:>15.2f}")
     print("\n")
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: oom_summary.py <log_filename>")
+    if len(sys.argv) < 2 or len(sys.argv) > 3:
+        print("Usage: oom_summary.py <log_filename> [-p]")
         sys.exit(1)
-
-    log_filename = sys.argv[1]
-    log_data = parse_log_file(log_filename)
-    mem_info_list = extract_memory_info(log_data)
-
-    for index, (timestamp, oom_invocation_line, memory_info) in enumerate(mem_info_list):
-        memory_summary = calculate_memory_usage(memory_info)
-        print_summary(memory_summary, index, timestamp, oom_invocation_line)
-
-if __name__ == "__main__":
-    main()
