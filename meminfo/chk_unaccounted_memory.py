@@ -22,7 +22,8 @@ if not os.path.isfile(filename):
 
 # List of memory fields to look for
 fields = ["MemTotal", "MemFree", "Buffers", "Cached", "Slab", "KernelStack",
-          "PageTables", "Percpu", "Hugetlb", "AnonPages", "Active(anon)", "Inactive(anon)"]
+          "PageTables", "Percpu", "AnonPages", "Active(anon)", "Inactive(anon)", 
+          "HugePages_Total", "Hugepagesize"]
 
 meminfo = {}
 
@@ -33,6 +34,14 @@ with open(filename, 'r') as f:
         key = parts[0].rstrip(':')
         if key in fields:
             meminfo[key] = int(parts[1])
+
+# Calculate HugePages memory
+if "HugePages_Total" in meminfo and "Hugepagesize" in meminfo:
+    meminfo["HugePages"] = meminfo["HugePages_Total"] * meminfo["Hugepagesize"]
+    fields.append("HugePages")  # Add HugePages to the fields list to be displayed
+else:
+    print("Error: Required HugePages_Total or Hugepagesize not found.")
+    sys.exit(1)
 
 # Determine how to handle AnonPages
 if "AnonPages" not in meminfo:
@@ -62,6 +71,12 @@ if not show_anonpages:
 else:
     accounted_memory_fields.remove("Active(anon)")
     accounted_memory_fields.remove("Inactive(anon)")
+
+# Remove HugePages_Total and Hugepagesize from accounted_memory_fields
+if "HugePages_Total" in accounted_memory_fields:
+    accounted_memory_fields.remove("HugePages_Total")
+if "Hugepagesize" in accounted_memory_fields:
+    accounted_memory_fields.remove("Hugepagesize")
 
 accounted_memory = sum(meminfo[field] for field in accounted_memory_fields)
 unaccounted_memory = total_memory - accounted_memory
