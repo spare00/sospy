@@ -6,8 +6,14 @@ import os
 # Default path to meminfo
 DEFAULT_MEMINFO = "proc/meminfo"
 
+# Check if '-v' is passed as an argument
+verbose = '-v' in sys.argv
+
+# Remove '-v' from arguments if present
+args = [arg for arg in sys.argv[1:] if arg != '-v']
+
 # Get the filename from the command-line arguments or use the default
-filename = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_MEMINFO
+filename = args[0] if len(args) > 0 else DEFAULT_MEMINFO
 
 # Check if the file exists
 if not os.path.isfile(filename):
@@ -24,23 +30,32 @@ meminfo = {}
 with open(filename, 'r') as f:
     for line in f:
         parts = line.split()
-        if parts[0].rstrip(':') in fields:
-            meminfo[parts[0]] = int(parts[1])
+        key = parts[0].rstrip(':')
+        if key in fields:
+            meminfo[key] = int(parts[1])
 
 # Check if MemTotal is in the parsed data
-if "MemTotal:" not in meminfo:
+if "MemTotal" not in meminfo:
     print("Error: MemTotal not found")
     sys.exit(1)
 
 # Calculate total used memory and unaccounted memory
-total_memory = meminfo["MemTotal:"]
-sum_memory = sum(meminfo.values())
-unaccounted_memory = total_memory - (sum_memory - total_memory)
+total_memory = meminfo["MemTotal"]
+accounted_memory = sum(meminfo[field] for field in fields if field in meminfo and field != "MemTotal")
+unaccounted_memory = total_memory - accounted_memory
+
+# Print the formula and values if verbose mode is enabled
+if verbose:
+    formula = f"Unaccounted Memory = MemTotal - ({' + '.join([f'{key}' for key in fields if key in meminfo and key != 'MemTotal'])})"
+    print("Formula used for calculation:")
+    print(formula)
+    print(f"Unaccounted Memory = {total_memory} - ({accounted_memory})")
+    print()
 
 # Print the memory information
 for key in fields:
-    if key + ":" in meminfo:
-        print(f"{key: <12} {meminfo[key + ':']: >12} kB")
+    if key in meminfo:
+        print(f"{key: <12} {meminfo[key]: >12} kB")
 
 # Print the unaccounted memory
 print("="*40)
