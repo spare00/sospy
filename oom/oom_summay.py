@@ -37,7 +37,7 @@ def extract_memory_info(log_data):
 
     return mem_info_list
 
-def calculate_memory_usage(memory_info):
+def calculate_memory_usage(memory_info, show_full):
     """Calculate memory usage summary from memory info."""
     page_size_kb = 4  # Page size in KB
     mb_conversion = lambda x: x * page_size_kb / 1024 if x else 0
@@ -77,13 +77,26 @@ def calculate_memory_usage(memory_info):
         'Reserved': (mb_conversion(memory_info['reserved']), mb_conversion(memory_info['reserved']) / 1024, memory_info['reserved']),
     }
 
+    # Include additional fields if show_full is True
+    if show_full:
+        memory_summary.update({
+            'Isolated Anon': (mb_conversion(memory_info['isolated_anon']), mb_conversion(memory_info['isolated_anon']) / 1024, memory_info['isolated_anon']),
+            'Isolated File': (mb_conversion(memory_info['isolated_file']), mb_conversion(memory_info['isolated_file']) / 1024, memory_info['isolated_file']),
+            'Unevictable': (mb_conversion(memory_info['unevictable']), mb_conversion(memory_info['unevictable']) / 1024, memory_info['unevictable']),
+            'Dirty': (mb_conversion(memory_info['dirty']), mb_conversion(memory_info['dirty']) / 1024, memory_info['dirty']),
+            'Writeback': (mb_conversion(memory_info['writeback']), mb_conversion(memory_info['writeback']) / 1024, memory_info['writeback']),
+            'Mapped': (mb_conversion(memory_info['mapped']), mb_conversion(memory_info['mapped']) / 1024, memory_info['mapped']),
+            'Bounce': (mb_conversion(memory_info['bounce']), mb_conversion(memory_info['bounce']) / 1024, memory_info['bounce']),
+            'Free CMA': (mb_conversion(memory_info['free_cma']), mb_conversion(memory_info['free_cma']) / 1024, memory_info['free_cma']),
+        })
+
     return memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb
 
 def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, oom_invocation_line, show_pages, show_unaccounted):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
     header = f"\nTimestamp: {timestamp}"
     if oom_invocation_line:
-        header += f"\n{Event: {oom_invocation_line}}"
+        header += f"\nEvent: {oom_invocation_line}"
     if show_pages:
         header += f"\n{'Category':<25} {'Pages':>15} {'MB':>15} {'GB':>10}\n{'='*68}"
     else:
@@ -115,19 +128,20 @@ def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory
     print("\n")
 
 def main():
-    if len(sys.argv) not in [2, 3]:
-        print("Usage: oom_summary.py [-p|-u] <log_filename>")
+    if len(sys.argv) < 2 or len(sys.argv) > 4:
+        print("Usage: oom_summary.py [-p|-u|-f] <log_filename>")
         sys.exit(1)
 
     show_pages = '-p' in sys.argv
     show_unaccounted = '-u' in sys.argv
+    show_full = '-f' in sys.argv
     log_filename = sys.argv[-1]
 
     log_data = parse_log_file(log_filename)
     mem_info_list = extract_memory_info(log_data)
 
     for timestamp, oom_invocation_line, memory_info in mem_info_list:
-        memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb = calculate_memory_usage(memory_info)
+        memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb = calculate_memory_usage(memory_info, show_full)
         print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, oom_invocation_line, show_pages, show_unaccounted)
 
 if __name__ == "__main__":
