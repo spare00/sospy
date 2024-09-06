@@ -24,6 +24,7 @@ tzinfos = {
     "IST": gettz("Asia/Kolkata"),
     "JST": gettz("Asia/Tokyo"),
     "WIB": gettz("Asia/Jakarta"),
+    "IDT": gettz("Asia/Jerusalem"),
     "AEST": gettz("Australia/Sydney"),
     "AEDT": gettz("Australia/Sydney"),
     "ACST": gettz("Australia/Adelaide"),
