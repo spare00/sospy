@@ -1,5 +1,6 @@
 # config.py
 
+# Predefined patterns to extract specific memory info from log sections
 patterns = {
     'active_anon': r'active_anon:(\d+)',
     'inactive_anon': r'inactive_anon:(\d+)',
@@ -24,5 +25,8 @@ patterns = {
     'total_pages_ram': r'(\d+) pages RAM',
 }
 
-mem_info_pattern = r'(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}).*Mem-Info:'
+# Regex to detect the Mem-Info line
+mem_info_pattern = r'(.*Mem-Info.*)'
+
+# Regex to detect the OOM invocation line
 oom_pattern = r'(.* invoked oom-killer:.*)'

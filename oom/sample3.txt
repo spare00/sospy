@@ -1,0 +1,34 @@
+[629612.208516] Mem-Info:
+[629612.208522] active_anon:23163185 inactive_anon:947854 isolated_anon:0
+ active_file:400 inactive_file:1481 isolated_file:34
+ unevictable:0 dirty:0 writeback:2 unstable:0
+ slab_reclaimable:122496 slab_unreclaimable:36947
+ mapped:3277 shmem:3838 pagetables:80697 bounce:0
+ free:114539 free_pcp:541 free_cma:0
+[629612.208576] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+[629612.208578] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+[629612.208579] 324723 total pagecache pages
+[629612.208586] 319265 pages in swap cache
+[629612.208587] Swap cache stats: add 1936695331, delete 1936166033, find 196178177/308248564
+[629612.208588] Free swap  = 0kB
+[629612.208589] Total swap = 33546236kB
+[629612.208590] 25165678 pages RAM
+[629612.208591] 0 pages HighMem/MovableOnly
+[629612.208592] 416354 pages reserved
+[629612.208516] Mem-Info:
+[629612.208522] active_anon:23163185 inactive_anon:947854 isolated_anon:0
+ active_file:400 inactive_file:1481 isolated_file:34
+ unevictable:0 dirty:0 writeback:2 unstable:0
+ slab_reclaimable:122496 slab_unreclaimable:36947
+ mapped:3277 shmem:3838 pagetables:80697 bounce:0
+ free:114539 free_pcp:541 free_cma:0
+[629612.208576] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+[629612.208578] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+[629612.208579] 324723 total pagecache pages
+[629612.208586] 319265 pages in swap cache
+[629612.208587] Swap cache stats: add 1936695331, delete 1936166033, find 196178177/308248564
+[629612.208588] Free swap  = 0kB
+[629612.208589] Total swap = 33546236kB
+[629612.208590] 25165678 pages RAM
+[629612.208591] 0 pages HighMem/MovableOnly
+[629612.208592] 416354 pages reserved

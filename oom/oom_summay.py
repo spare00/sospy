@@ -13,26 +13,41 @@ def parse_log_file(filename):
         print(f"Error: File '{filename}' not found.")
         sys.exit(1)
 
-def extract_memory_info(log_data):
-    """Extracts memory information and timestamps from log sections starting with 'Mem-Info:'."""
-    # Find all sections starting with 'Mem-Info' along with their timestamps
-    mem_info_sections = re.split(mem_info_pattern, log_data)[1:]
+    return mem_info_list
 
-    # Extract timestamps
-    timestamps = [timestamp.strip() for timestamp in mem_info_sections[0::2]]
-    # Extract corresponding Mem-Info sections
+def extract_memory_info(log_data):
+    """Extracts memory information and timestamps from different log patterns."""
+
+    if re.search(mem_info_pattern, log_data):
+        mem_info_sections = re.split(mem_info_pattern, log_data)[1:]
+    else:
+        print("Error: Unknown log format.")
+        sys.exit(1)
+
+    # Extract timestamps and memory info blocks
+    timestamps = mem_info_sections[0::2]
     mem_info_sections = mem_info_sections[1::2]
 
     mem_info_list = []
 
     for timestamp, section in zip(timestamps, mem_info_sections):
-        # Ensure the timestamp is cleaned up
-        timestamp = ' '.join(timestamp.split())
+        # Normalize the timestamp (remove unnecessary kernel info if needed)
+        if "kernel:" in timestamp:
+            timestamp = re.sub(r'kernel:.*Mem-Info:', '', timestamp).strip()
 
-        memory_info = {key: int(re.search(regex, section).group(1)) if re.search(regex, section) else 0
-                       for key, regex in patterns.items()}
+        # Extract memory information based on predefined patterns
+        memory_info = {}
+        for key, regex in patterns.items():
+            match = re.search(regex, section)
+            if match:
+                memory_info[key] = int(match.group(1))
+            else:
+                memory_info[key] = 0  # Default to 0 if key is missing
+
+        # Try to match the OOM invocation line
         oom_invocation_line = re.search(oom_pattern, section)
         oom_invocation_line = oom_invocation_line.group(1) if oom_invocation_line else ""
+
         mem_info_list.append((timestamp, oom_invocation_line, memory_info))
 
     return mem_info_list

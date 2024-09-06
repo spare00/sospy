@@ -1,0 +1,38 @@
+Sep 11 21:22:24 localhost kernel: [363020.406341] Mem-Info:
+Sep 11 21:22:24 localhost kernel: [363020.406342] active_anon:1250769 inactive_anon:4666349 isolated_anon:0
+Sep 11 21:22:24 localhost kernel: [363020.406342]  active_file:141 inactive_file:167 isolated_file:12
+Sep 11 21:22:24 localhost kernel: [363020.406342]  unevictable:6153 dirty:0 writeback:0
+Sep 11 21:22:24 localhost kernel: [363020.406342]  slab_reclaimable:13107 slab_unreclaimable:46511
+Sep 11 21:22:24 localhost kernel: [363020.406342]  mapped:16037 shmem:12823 pagetables:17104 bounce:0
+Sep 11 21:22:24 localhost kernel: [363020.406342]  free:46217 free_pcp:296 free_cma:0
+Sep 11 21:22:24 localhost kernel: [363020.406396] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+Sep 11 21:22:24 localhost kernel: [363020.406398] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+Sep 11 21:22:24 localhost kernel: [363020.406399] 39484 total pagecache pages
+Sep 11 21:22:24 localhost kernel: [363020.406399] 23169 pages in swap cache
+Sep 11 21:22:24 localhost kernel: [363020.406400] Swap cache stats: add 1254707, delete 1231586, find 1091914/1156181
+Sep 11 21:22:24 localhost kernel: [363020.406401] Free swap  = 0kB
+Sep 11 21:22:24 localhost kernel: [363020.406402] Total swap = 2097148kB
+Sep 11 21:22:24 localhost kernel: [363020.406402] 6291206 pages RAM
+Sep 11 21:22:24 localhost kernel: [363020.406403] 0 pages HighMem/MovableOnly
+Sep 11 21:22:24 localhost kernel: [363020.406404] 192372 pages reserved
+Sep 11 21:22:24 localhost kernel: [363020.406404] 0 pages hwpoisoned
+Sep 11 21:22:24 localhost kernel: [363020.406405] Tasks state (memory values in pages):
+Sep 11 21:22:24 localhost kernel: [363020.406341] Mem-Info:
+Sep 11 21:22:24 localhost kernel: [363020.406342] active_anon:1250769 inactive_anon:4666349 isolated_anon:0
+Sep 11 21:22:24 localhost kernel: [363020.406342]  active_file:141 inactive_file:167 isolated_file:12
+Sep 11 21:22:24 localhost kernel: [363020.406342]  unevictable:6153 dirty:0 writeback:0
+Sep 11 21:22:24 localhost kernel: [363020.406342]  slab_reclaimable:13107 slab_unreclaimable:46511
+Sep 11 21:22:24 localhost kernel: [363020.406342]  mapped:16037 shmem:12823 pagetables:17104 bounce:0
+Sep 11 21:22:24 localhost kernel: [363020.406342]  free:46217 free_pcp:296 free_cma:0
+Sep 11 21:22:24 localhost kernel: [363020.406396] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+Sep 11 21:22:24 localhost kernel: [363020.406398] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+Sep 11 21:22:24 localhost kernel: [363020.406399] 39484 total pagecache pages
+Sep 11 21:22:24 localhost kernel: [363020.406399] 23169 pages in swap cache
+Sep 11 21:22:24 localhost kernel: [363020.406400] Swap cache stats: add 1254707, delete 1231586, find 1091914/1156181
+Sep 11 21:22:24 localhost kernel: [363020.406401] Free swap  = 0kB
+Sep 11 21:22:24 localhost kernel: [363020.406402] Total swap = 2097148kB
+Sep 11 21:22:24 localhost kernel: [363020.406402] 6291206 pages RAM
+Sep 11 21:22:24 localhost kernel: [363020.406403] 0 pages HighMem/MovableOnly
+Sep 11 21:22:24 localhost kernel: [363020.406404] 192372 pages reserved
+Sep 11 21:22:24 localhost kernel: [363020.406404] 0 pages hwpoisoned
+Sep 11 21:22:24 localhost kernel: [363020.406405] Tasks state (memory values in pages):
