@@ -2,18 +2,37 @@
 
 import sys
 import os
+import argparse
 
 # Default path to meminfo
-DEFAULT_MEMINFO = "proc/meminfo"
+DEFAULT_MEMINFO = "/proc/meminfo"
 
-# Check if '-v' is passed as an argument
-verbose = '-v' in sys.argv
+# Create an argument parser
+parser = argparse.ArgumentParser(
+    description="Calculate unaccounted memory from /proc/meminfo or a custom file."
+)
+parser.add_argument(
+    "filename",
+    nargs="?",
+    default=None,
+    help="Path to the meminfo file (default: /proc/meminfo)"
+)
+parser.add_argument(
+    "-v", "--verbose",
+    action="store_true",
+    help="Display verbose output with the memory calculation formula"
+)
 
-# Remove '-v' from arguments if present
-args = [arg for arg in sys.argv[1:] if arg != '-v']
+# Parse the arguments
+args = parser.parse_args()
 
-# Get the filename from the command-line arguments or use the default
-filename = args[0] if len(args) > 0 else DEFAULT_MEMINFO
+# If no filename is provided, print the help message and exit
+if not args.filename:
+    parser.print_help()
+    sys.exit(0)
+
+# Use the provided filename or the default
+filename = args.filename or DEFAULT_MEMINFO
 
 # Check if the file exists
 if not os.path.isfile(filename):
@@ -22,7 +41,7 @@ if not os.path.isfile(filename):
 
 # List of memory fields to look for
 fields = ["MemTotal", "MemFree", "Buffers", "Cached", "Slab", "KernelStack",
-          "PageTables", "Percpu", "AnonPages", "Active(anon)", "Inactive(anon)", 
+          "PageTables", "Percpu", "AnonPages", "Active(anon)", "Inactive(anon)",
           "HugePages_Total", "Hugepagesize"]
 
 meminfo = {}
@@ -82,7 +101,7 @@ accounted_memory = sum(meminfo[field] for field in accounted_memory_fields)
 unaccounted_memory = total_memory - accounted_memory
 
 # Print the formula and values if verbose mode is enabled
-if verbose:
+if args.verbose:
     formula = f"Unaccounted Memory = MemTotal - ({' + '.join(accounted_memory_fields)})"
     print("Formula used for calculation:")
     print(f"  {formula}")
