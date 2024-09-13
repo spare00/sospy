@@ -89,9 +89,10 @@ if verbose:
     print(f"  Unaccounted Memory = {total_memory} - ({accounted_memory})\n")
 
 # Print the memory information with proper alignment and enhanced formatting
-header = f"{'Field':<15} {'Size (kB)':>15}"
+header = f"{'Field':<15} {'Size (kB)':>15}   "
 print(header)
 print("=" * len(header))
+print(f"{'MemTotal:':<15} {total_memory:>15,} kB")
 
 for key in fields:
     if key in accounted_memory_fields:
