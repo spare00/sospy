@@ -1,7 +1,9 @@
 Nov 25 18:02:11 localhost kernel: Mem-Info:
 Nov 25 18:02:11 localhost kernel: active_anon:2841535 inactive_anon:1032708 isolated_anon:0#012 active_file:52 inactive_file:350 isolated_file:18#012 unevictable:0 dirty:0 writeback:0#012 slab_reclaimable:15590 slab_unreclaimable:28792#012 mapped:31450 shmem:34701 pagetables:22953 bounce:0#012 free:33808 free_pcp:816 free_cma:0
 Nov 25 18:02:11 localhost kernel: Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
-Nov 25 18:02:11 localhost kernel: Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+Nov 25 18:02:11 localhost kernel: Node 0 hugepages_total=10 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+Nov 25 18:02:11 localhost kernel: Node 1 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+Nov 25 18:02:11 localhost kernel: Node 1 hugepages_total=30 hugepages_free=10 hugepages_surp=0 hugepages_size=2048kB
 Nov 25 18:02:11 localhost kernel: 53650 total pagecache pages
 Nov 25 18:02:11 localhost kernel: 18291 pages in swap cache
 Nov 25 18:02:11 localhost kernel: Swap cache stats: add 3908301, delete 3889948, find 1904000/2285325
@@ -13,8 +15,10 @@ Nov 25 18:02:11 localhost kernel: 160555 pages reserved
 Nov 25 18:02:11 localhost kernel: 0 pages hwpoisoned
 Nov 25 18:02:11 localhost kernel: Mem-Info:
 Nov 25 18:02:11 localhost kernel: active_anon:2841535 inactive_anon:1032708 isolated_anon:0#012 active_file:52 inactive_file:350 isolated_file:18#012 unevictable:0 dirty:0 writeback:0#012 slab_reclaimable:15590 slab_unreclaimable:28792#012 mapped:31450 shmem:34701 pagetables:22953 bounce:0#012 free:33808 free_pcp:816 free_cma:0
-Nov 25 18:02:11 localhost kernel: Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+Nov 25 18:02:11 localhost kernel: Node 0 hugepages_total=2 hugepages_free=1 hugepages_surp=0 hugepages_size=1048576kB
 Nov 25 18:02:11 localhost kernel: Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+Nov 25 18:02:11 localhost kernel: Node 1 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+Nov 25 18:02:11 localhost kernel: Node 1 hugepages_total=10 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
 Nov 25 18:02:11 localhost kernel: 53650 total pagecache pages
 Nov 25 18:02:11 localhost kernel: 18291 pages in swap cache
 Nov 25 18:02:11 localhost kernel: Swap cache stats: add 3908301, delete 3889948, find 1904000/2285325

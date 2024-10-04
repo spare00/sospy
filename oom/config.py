@@ -23,6 +23,12 @@ patterns = {
     'pagecache': r'(\d+) total pagecache pages',
     'reserved': r'(\d+) pages reserved',
     'total_pages_ram': r'(\d+) pages RAM',
+
+    # Add patterns for hugepage-related information
+    'hugepages_total': r'hugepages_total=(\d+)',       # Total hugepages
+    'hugepages_free': r'hugepages_free=(\d+)',         # Free hugepages
+    'hugepages_surp': r'hugepages_surp=(\d+)',         # Surplus hugepages
+    'hugepages_size': r'hugepages_size=(\d+)kB',       # Size of hugepages in kB
 }
 
 # Regex to detect the Mem-Info line

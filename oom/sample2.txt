@@ -26,6 +26,8 @@ Sep 11 21:22:24 localhost kernel: [363020.406342]  mapped:16037 shmem:12823 page
 Sep 11 21:22:24 localhost kernel: [363020.406342]  free:46217 free_pcp:296 free_cma:0
 Sep 11 21:22:24 localhost kernel: [363020.406396] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
 Sep 11 21:22:24 localhost kernel: [363020.406398] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+Sep 11 21:22:24 localhost kernel: [363020.406396] Node 1 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+Sep 11 21:22:24 localhost kernel: [363020.406398] Node 1 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
 Sep 11 21:22:24 localhost kernel: [363020.406399] 39484 total pagecache pages
 Sep 11 21:22:24 localhost kernel: [363020.406399] 23169 pages in swap cache
 Sep 11 21:22:24 localhost kernel: [363020.406400] Swap cache stats: add 1254707, delete 1231586, find 1091914/1156181

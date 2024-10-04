@@ -32,8 +32,7 @@ def extract_memory_info(log_data):
 
     for timestamp, section in zip(timestamps, mem_info_sections):
         # Normalize the timestamp (remove unnecessary kernel info if needed)
-        if "kernel:" in timestamp:
-            timestamp = re.sub(r'kernel:.*Mem-Info:', '', timestamp).strip()
+        timestamp = re.sub(r'\[\d+\.\d+\]', '', timestamp)  # Handle bracketed timestamps
 
         # Extract memory information based on predefined patterns
         memory_info = {}
@@ -44,25 +43,55 @@ def extract_memory_info(log_data):
             else:
                 memory_info[key] = 0  # Default to 0 if key is missing
 
+        # Initialize accumulators for hugepages across nodes
+        total_hugepages_memory_kb = 0  # To accumulate total hugepage memory across nodes
+        used_hugepages_memory_kb = 0  # To accumulate used hugepage memory across nodes
+
+        # Extract hugepage information for multiple nodes
+        node_sections = re.findall(r'Node \d+ (.*)', section)
+        for node_section in node_sections:
+            hugepages_total = 0
+            hugepages_free = 0
+            hugepages_size_kb = 0
+
+            # Extract the total, free, and size of hugepages for each node
+            match_total = re.search(r'hugepages_total=(\d+)', node_section)
+            match_free = re.search(r'hugepages_free=(\d+)', node_section)
+            match_size = re.search(r'hugepages_size=(\d+)kB', node_section)
+
+            if match_total and match_free and match_size:
+                hugepages_total = int(match_total.group(1))
+                hugepages_free = int(match_free.group(1))
+                hugepages_size_kb = int(match_size.group(1))
+
+                # Calculate used hugepages for the node
+                hugepages_used = hugepages_total - hugepages_free
+
+                # Accumulate totals across nodes
+                total_hugepages_memory_kb += hugepages_total * hugepages_size_kb
+                used_hugepages_memory_kb += hugepages_used * hugepages_size_kb
+
         # Try to match the OOM invocation line
         oom_invocation_line = re.search(oom_pattern, section)
         oom_invocation_line = oom_invocation_line.group(1) if oom_invocation_line else ""
 
-        mem_info_list.append((timestamp, oom_invocation_line, memory_info))
+        mem_info_list.append((timestamp, oom_invocation_line, memory_info, total_hugepages_memory_kb, used_hugepages_memory_kb))
 
     return mem_info_list
 
-def calculate_memory_usage(memory_info, show_full):
+def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, show_full):
     """Calculate memory usage summary from memory info."""
     page_size_kb = 4  # Page size in KB
     mb_conversion = lambda x: x * page_size_kb / 1024 if x else 0
 
-    # Extract total memory and remove it from the main summary
     total_memory_pages = memory_info.pop('total_pages_ram', 0)
     total_memory_mb = total_memory_pages * page_size_kb / 1024
     total_memory_gb = total_memory_mb / 1024
 
-    # Handle pagecache correctly by avoiding double-counting
+    # Convert hugepage memory from KB to MB
+    hugepages_total_mb = hugepages_total_kb / 1024
+    hugepages_used_mb = hugepages_used_kb / 1024
+
     pagecache_mb = mb_conversion(memory_info.get('pagecache', 0))
     accounted_memory_mb = pagecache_mb + mb_conversion(memory_info.get('shmem', 0)) + \
                           mb_conversion(memory_info.get('slab_reclaimable', 0)) + \
@@ -74,8 +103,8 @@ def calculate_memory_usage(memory_info, show_full):
                           mb_conversion(memory_info.get('active_anon', 0)) + \
                           mb_conversion(memory_info.get('inactive_anon', 0))
 
-    # Calculate unaccounted memory
-    unaccounted_memory_mb = total_memory_mb - accounted_memory_mb
+    # Calculate unaccounted memory (subtracting hugepage memory too)
+    unaccounted_memory_mb = total_memory_mb - accounted_memory_mb - hugepages_total_mb
 
     memory_summary = {
         'Active Anon': (mb_conversion(memory_info['active_anon']), mb_conversion(memory_info['active_anon']) / 1024, memory_info['active_anon']),
@@ -90,6 +119,9 @@ def calculate_memory_usage(memory_info, show_full):
         'Free Pcp': (mb_conversion(memory_info['free_pcp']), mb_conversion(memory_info['free_pcp']) / 1024, memory_info['free_pcp']),
         'Pagecache': (pagecache_mb, pagecache_mb / 1024, memory_info['pagecache']),
         'Reserved': (mb_conversion(memory_info['reserved']), mb_conversion(memory_info['reserved']) / 1024, memory_info['reserved']),
+        'Hugepages Total': (hugepages_total_mb, hugepages_total_mb / 1024, hugepages_total_kb / 4),
+        'Hugepages Used': (hugepages_used_mb, hugepages_used_mb / 1024, hugepages_used_kb / 4),
+        # Add other memory categories...
     }
 
     # Include additional fields if show_full is True
@@ -105,6 +137,7 @@ def calculate_memory_usage(memory_info, show_full):
             'Free CMA': (mb_conversion(memory_info['free_cma']), mb_conversion(memory_info['free_cma']) / 1024, memory_info['free_cma']),
         })
 
+    # Return memory summary, total memory details, etc.
     return memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb
 
 def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, oom_invocation_line, show_pages, show_unaccounted):
@@ -147,17 +180,26 @@ def main():
         print("Usage: oom_summary.py [-p|-u|-f] <log_filename>")
         sys.exit(1)
 
+    # Parse command-line options
     show_pages = '-p' in sys.argv
     show_unaccounted = '-u' in sys.argv
     show_full = '-f' in sys.argv
     log_filename = sys.argv[-1]
 
+    # Read and parse the log file
     log_data = parse_log_file(log_filename)
     mem_info_list = extract_memory_info(log_data)
 
-    for timestamp, oom_invocation_line, memory_info in mem_info_list:
-        memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb = calculate_memory_usage(memory_info, show_full)
-        print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, oom_invocation_line, show_pages, show_unaccounted)
+    # Iterate over each memory event in the log file
+    for timestamp, oom_invocation_line, memory_info, total_hugepages_kb, used_hugepages_kb in mem_info_list:
+        # Calculate memory usage, now including hugepage memory
+        memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb = calculate_memory_usage(
+            memory_info, total_hugepages_kb, used_hugepages_kb, show_full)
+
+        # Print memory summary for each event
+        print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages,
+                      unaccounted_memory_mb, timestamp, oom_invocation_line, show_pages, show_unaccounted)
+
 
 if __name__ == "__main__":
     main()

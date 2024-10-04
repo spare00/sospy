@@ -24,6 +24,8 @@
  free:114539 free_pcp:541 free_cma:0
 [629612.208576] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
 [629612.208578] Node 0 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
+[629612.208576] Node 1 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=1048576kB
+[629612.208578] Node 1 hugepages_total=0 hugepages_free=0 hugepages_surp=0 hugepages_size=2048kB
 [629612.208579] 324723 total pagecache pages
 [629612.208586] 319265 pages in swap cache
 [629612.208587] Swap cache stats: add 1936695331, delete 1936166033, find 196178177/308248564
