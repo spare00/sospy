@@ -18,11 +18,13 @@ def parse_log_file(filename):
 def extract_memory_info(log_data):
     """Extracts memory information and timestamps from different log patterns."""
 
-    if re.search(mem_info_pattern, log_data):
-        mem_info_sections = re.split(mem_info_pattern, log_data)[1:]
-    else:
-        print("Error: Unknown log format.")
-        sys.exit(1)
+    # Check if there is a match for Mem-Info in the log
+    if not re.search(mem_info_pattern, log_data):
+        print("No OOM events found in the log file.")
+        return []  # Return an empty list instead of exiting the script
+
+    # Split the log based on Mem-Info sections
+    mem_info_sections = re.split(mem_info_pattern, log_data)[1:]
 
     # Extract timestamps and memory info blocks
     timestamps = mem_info_sections[0::2]
