@@ -1,0 +1,54 @@
+00000000-00000fff : reserved
+00001000-0009ffff : System RAM
+000a0000-000bffff : PCI Bus 0000:00
+000f0000-000fffff : System ROM
+00100000-7ecbc017 : System RAM
+  0fa00000-1019b278 : Kernel code
+  1019b279-1076bdff : Kernel data
+  10965000-10c72fff : Kernel bss
+  2d000000-370fffff : Crash kernel
+7ecbc018-7ece2e57 : System RAM
+7ece2e58-7f8eefff : System RAM
+7f8ef000-7faeefff : reserved
+7faef000-7fb75fff : System RAM
+7fb76000-7fb7efff : ACPI Tables
+7fb7f000-7fbfefff : ACPI Non-volatile Storage
+7fbff000-7ff7bfff : System RAM
+7ff7c000-7fffffff : reserved
+80000000-afffffff : PCI Bus 0000:00
+  80000000-8003ffff : 0000:00:01.0
+b0000000-bfffffff : PCI MMCONFIG 0000 [bus 00-ff]
+  b0000000-bfffffff : reserved
+    b0000000-bfffffff : pnp 00:01
+c0000000-febfffff : PCI Bus 0000:00
+  c0040000-c005ffff : 0000:00:01.0
+    c0040000-c005ffff : e1000
+  c0060000-c0063fff : 0000:00:03.0
+    c0060000-c0063fff : ICH HD audio
+  c0064000-c0064fff : 0000:00:1f.2
+    c0064000-c0064fff : ahci
+  c0065000-c0065fff : 0000:00:1d.7
+    c0065000-c0065fff : ehci_hcd
+  c0066000-c0066fff : 0000:00:07.0
+  c0067000-c0067fff : 0000:00:06.0
+  c0068000-c0068fff : 0000:00:05.0
+  c0069000-c0069fff : 0000:00:02.0
+fec00000-fec003ff : IOAPIC 0
+fed1f410-fed1f414 : iTCO_wdt.0.auto
+  fed1f410-fed1f414 : iTCO_wdt.0.auto
+fee00000-fee00fff : Local APIC
+ffc00000-ffffffff : reserved
+800000000-fffffffff : PCI Bus 0000:00
+  800000000-800003fff : 0000:00:02.0
+    800000000-800003fff : virtio-pci-modern
+  800004000-800007fff : 0000:00:05.0
+    800004000-800007fff : virtio-pci-modern
+  800008000-80000bfff : 0000:00:06.0
+    800008000-80000bfff : virtio-pci-modern
+  80000c000-80000ffff : 0000:00:07.0
+    80000c000-80000ffff : virtio-pci-modern
+  800010000-800013fff : 0000:00:08.0
+    800010000-800013fff : virtio-pci-modern
+  800014000-800017fff : 0000:00:04.0
+    800014000-800017fff : xhci-hcd
+
