@@ -1,0 +1,112 @@
+00000000-00000fff : Reserved
+00001000-0009efff : System RAM
+0009f000-0009ffff : Reserved
+000a0000-000bffff : PCI Bus 0000:00
+000c0000-000c7fff : Video ROM
+000ca000-000cafff : Adapter ROM
+000cc000-000cffff : PCI Bus 0000:00
+000d0000-000d3fff : PCI Bus 0000:00
+000d4000-000d7fff : PCI Bus 0000:00
+000d8000-000dbfff : PCI Bus 0000:00
+000dc000-000fffff : Reserved
+  000f0000-000fffff : System ROM
+00100000-bfecffff : System RAM
+  af000000-beffffff : Crash kernel
+bfed0000-bfefefff : ACPI Tables
+bfeff000-bfefffff : ACPI Non-volatile Storage
+bff00000-bfffffff : System RAM
+c0000000-febfffff : PCI Bus 0000:00
+  c0000000-c01fffff : PCI Bus 0000:03
+  c0200000-c03fffff : PCI Bus 0000:0b
+  e9d00000-e9dfffff : PCI Bus 0000:22
+  e9e00000-e9efffff : PCI Bus 0000:1a
+  e9f00000-e9ffffff : PCI Bus 0000:12
+  ea000000-ea0fffff : PCI Bus 0000:0a
+  ea100000-ea1fffff : PCI Bus 0000:21
+  ea200000-ea2fffff : PCI Bus 0000:19
+  ea300000-ea3fffff : PCI Bus 0000:11
+  ea400000-ea4fffff : PCI Bus 0000:09
+  ea500000-ea5fffff : PCI Bus 0000:20
+  ea600000-ea6fffff : PCI Bus 0000:18
+  ea700000-ea7fffff : PCI Bus 0000:10
+  ea800000-ea8fffff : PCI Bus 0000:08
+  ea900000-ea9fffff : PCI Bus 0000:1f
+  eaa00000-eaafffff : PCI Bus 0000:17
+  eab00000-eabfffff : PCI Bus 0000:0f
+  eac00000-eacfffff : PCI Bus 0000:07
+  ead00000-eadfffff : PCI Bus 0000:1e
+  eae00000-eaefffff : PCI Bus 0000:16
+  eaf00000-eaffffff : PCI Bus 0000:0e
+  eb000000-eb0fffff : PCI Bus 0000:06
+  eb100000-eb1fffff : PCI Bus 0000:1d
+  eb200000-eb2fffff : PCI Bus 0000:15
+  eb300000-eb3fffff : PCI Bus 0000:0d
+  eb400000-eb4fffff : PCI Bus 0000:05
+  eb500000-eb5fffff : PCI Bus 0000:1c
+  eb600000-eb6fffff : PCI Bus 0000:14
+  eb700000-eb7fffff : PCI Bus 0000:0c
+  eb800000-eb8fffff : PCI Bus 0000:04
+  eb900000-eb9fffff : PCI Bus 0000:1b
+  eba00000-ebafffff : PCI Bus 0000:13
+  ebb00000-ebffffff : PCI Bus 0000:02
+  ec000000-efffffff : 0000:00:0f.0
+  f0000000-f7ffffff : PCI MMCONFIG 0000 [bus 00-7f]
+    f0000000-f7ffffff : Reserved
+      f0000000-f7ffffff : pnp 00:09
+  fb600000-fb6fffff : PCI Bus 0000:22
+  fb700000-fb7fffff : PCI Bus 0000:1a
+  fb800000-fb8fffff : PCI Bus 0000:12
+  fb900000-fb9fffff : PCI Bus 0000:0a
+  fba00000-fbafffff : PCI Bus 0000:21
+  fbb00000-fbbfffff : PCI Bus 0000:19
+  fbc00000-fbcfffff : PCI Bus 0000:11
+  fbd00000-fbdfffff : PCI Bus 0000:09
+  fbe00000-fbefffff : PCI Bus 0000:20
+  fbf00000-fbffffff : PCI Bus 0000:18
+  fc000000-fc0fffff : PCI Bus 0000:10
+  fc100000-fc1fffff : PCI Bus 0000:08
+  fc200000-fc2fffff : PCI Bus 0000:1f
+  fc300000-fc3fffff : PCI Bus 0000:17
+  fc400000-fc4fffff : PCI Bus 0000:0f
+  fc500000-fc5fffff : PCI Bus 0000:07
+  fc600000-fc6fffff : PCI Bus 0000:1e
+  fc700000-fc7fffff : PCI Bus 0000:16
+  fc800000-fc8fffff : PCI Bus 0000:0e
+  fc900000-fc9fffff : PCI Bus 0000:06
+  fca00000-fcafffff : PCI Bus 0000:1d
+  fcb00000-fcbfffff : PCI Bus 0000:15
+  fcc00000-fccfffff : PCI Bus 0000:0d
+  fcd00000-fcdfffff : PCI Bus 0000:05
+  fce00000-fcefffff : PCI Bus 0000:1c
+  fcf00000-fcffffff : PCI Bus 0000:14
+  fd000000-fd0fffff : PCI Bus 0000:0c
+  fd100000-fd1fffff : PCI Bus 0000:04
+  fd200000-fd2fffff : PCI Bus 0000:1b
+  fd300000-fd3fffff : PCI Bus 0000:13
+  fd400000-fd4fffff : PCI Bus 0000:0b
+    fd400000-fd40ffff : 0000:0b:00.0
+    fd4fc000-fd4fcfff : 0000:0b:00.0
+      fd4fc000-fd4fcfff : vmxnet3
+    fd4fd000-fd4fdfff : 0000:0b:00.0
+      fd4fd000-fd4fdfff : vmxnet3
+    fd4fe000-fd4fffff : 0000:0b:00.0
+  fd500000-fd5fffff : PCI Bus 0000:03
+    fd500000-fd50ffff : 0000:03:00.0
+    fd5f8000-fd5fffff : 0000:03:00.0
+      fd5f8000-fd5fffff : vmw_pvscsi
+  fd600000-fdffffff : PCI Bus 0000:02
+  fe000000-fe7fffff : 0000:00:0f.0
+  fe800000-fe9fffff : pnp 00:09
+  febfe000-febfffff : 0000:00:07.7
+fec00000-fec0ffff : Reserved
+  fec00000-fec003ff : IOAPIC 0
+fed00000-fed003ff : HPET 0
+  fed00000-fed003ff : pnp 00:04
+fee00000-fee00fff : Local APIC
+  fee00000-fee00fff : Reserved
+fffe0000-ffffffff : Reserved
+100000000-43fffffff : System RAM
+  223800000-224600f28 : Kernel code
+  224600f29-2257d013f : Kernel data
+  225e7a000-2277fffff : Kernel bss
+
