@@ -73,11 +73,8 @@ def extract_memory_info(log_data):
                 total_hugepages_memory_kb += hugepages_total * hugepages_size_kb
                 used_hugepages_memory_kb += hugepages_used * hugepages_size_kb
 
-        # Try to match the OOM invocation line
-        oom_invocation_line = re.search(oom_pattern, section)
-        oom_invocation_line = oom_invocation_line.group(1) if oom_invocation_line else ""
-
-        mem_info_list.append((timestamp, oom_invocation_line, memory_info, total_hugepages_memory_kb, used_hugepages_memory_kb))
+        # Use the Mem-Info timestamp as the primary reference for the event
+        mem_info_list.append((timestamp, memory_info, total_hugepages_memory_kb, used_hugepages_memory_kb))
 
     return mem_info_list
 
@@ -142,11 +139,11 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
     # Return memory summary, total memory details, etc.
     return memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb
 
-def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, oom_invocation_line, show_pages, show_unaccounted):
+def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, show_pages, show_unaccounted):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
+    # Only show the Timestamp, without any additional "Event" lines.
     header = f"\nTimestamp: {timestamp}"
-    if oom_invocation_line:
-        header += f"\nEvent: {oom_invocation_line}"
+
     if show_pages:
         header += f"\n{'Category':<25} {'Pages':>15} {'MB':>15} {'GB':>10}\n{'='*68}"
     else:
@@ -193,15 +190,14 @@ def main():
     mem_info_list = extract_memory_info(log_data)
 
     # Iterate over each memory event in the log file
-    for timestamp, oom_invocation_line, memory_info, total_hugepages_kb, used_hugepages_kb in mem_info_list:
+    for timestamp, memory_info, total_hugepages_kb, used_hugepages_kb in mem_info_list:
         # Calculate memory usage, now including hugepage memory
         memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb = calculate_memory_usage(
             memory_info, total_hugepages_kb, used_hugepages_kb, show_full)
 
         # Print memory summary for each event
         print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages,
-                      unaccounted_memory_mb, timestamp, oom_invocation_line, show_pages, show_unaccounted)
-
+                      unaccounted_memory_mb, timestamp, show_pages, show_unaccounted)
 
 if __name__ == "__main__":
     main()
