@@ -7,6 +7,7 @@ import argparse
 def parse_iomem(file_path, reserved_only):
 
     hierarchy = []  # Stack to keep track of the hierarchy
+    total_reserved_size = 0  # Variable to track total reserved memory
     size = None  # Declare size here to avoid UnboundLocalError
 
     # Read all lines of the file at once
@@ -33,6 +34,8 @@ def parse_iomem(file_path, reserved_only):
 
         # Check if the line contains 'Reserved' (case-insensitive) and print it along with hierarchy
         if "reserved" in line.lower():
+            total_reserved_size += size  # Add reserved size to total
+
             # Print the entire hierarchy leading to this Reserved entry
             for j, parent in enumerate(hierarchy[:-1]):  # Avoid printing the Reserved line itself twice
                 match_parent = re.search(r'([0-9a-fA-F]+)-([0-9a-fA-F]+)', parent)
@@ -60,6 +63,7 @@ def parse_iomem(file_path, reserved_only):
                         start_child = int(match_child.group(1), 16)
                         end_child = int(match_child.group(2), 16)
                         size_child = (end_child - start_child + 1)
+                        total_reserved_size += size_child  # Add child reserved size to total
                         print(f"{next_line.rstrip()}\t {size_child} ({size_child / (2**20):.2f} MB)")
 
         # Exclude lines that don't contain 'Reserved' (case-insensitive) and do not cause an indentation change
@@ -70,6 +74,9 @@ def parse_iomem(file_path, reserved_only):
             # Skip lines where indentation does not change before or after
             if current_indent == prev_indent == next_indent:
                 continue  # Skip this line if it's not changing indentation and doesn't contain 'Reserved'
+
+    # Print the total reserved memory size at the end
+    print(f"\nTotal reserved memory: {total_reserved_size} bytes ({total_reserved_size / (2**30):.2f} GB)")
 
 # Function to handle other options
 def parse_full_iomem(file_path, top_level_only, search_keyword=None):
