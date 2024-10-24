@@ -2,6 +2,8 @@
 
 import sys
 import re
+import argparse
+
 from config import patterns, mem_info_pattern, oom_pattern
 
 def parse_log_file(filename):
@@ -175,15 +177,24 @@ def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory
     print("\n")
 
 def main():
-    if len(sys.argv) < 2 or len(sys.argv) > 4:
-        print("Usage: oom_summary.py [-p|-u|-f] <log_filename>")
-        sys.exit(1)
-
-    # Parse command-line options
-    show_pages = '-p' in sys.argv
-    show_unaccounted = '-u' in sys.argv
-    show_full = '-f' in sys.argv
-    log_filename = sys.argv[-1]
+    # Use argparse for flexible option parsing
+    parser = argparse.ArgumentParser(description="Parse OOM logs and display memory summaries.")
+    
+    # Define the flags
+    parser.add_argument('-p', '--pages', action='store_true', help="Show memory usage in pages.")
+    parser.add_argument('-u', '--unaccounted', action='store_true', help="Show unaccounted memory.")
+    parser.add_argument('-f', '--full', action='store_true', help="Show full memory info.")
+    
+    # Define the positional argument for log file name
+    parser.add_argument('log_filename', metavar='log_filename', type=str, help="Log file to parse.")
+    
+    # Parse arguments
+    args = parser.parse_args()
+    
+    show_pages = args.pages
+    show_unaccounted = args.unaccounted
+    show_full = args.full
+    log_filename = args.log_filename
 
     # Read and parse the log file
     log_data = parse_log_file(log_filename)
