@@ -25,7 +25,8 @@ def parse_oom_log(file_path):
                 # Collect the relevant data within the OOM event
                 if current_event:
                     oom_events[current_event].append(line.strip())
-                    if "Out of memory: Killed process" in line:
+                    if "Out of memory: Killed process" in line or \
+                       "Out of memory: Kill process" in line:
                         current_event = None
     except FileNotFoundError:
         print(f"File not found: {file_path}")
