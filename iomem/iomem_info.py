@@ -63,7 +63,8 @@ def parse_iomem(file_path, reserved_only):
                         start_child = int(match_child.group(1), 16)
                         end_child = int(match_child.group(2), 16)
                         size_child = (end_child - start_child + 1)
-                        total_reserved_size += size_child  # Add child reserved size to total
+                        if "reserved" in next_line.lower():
+                            total_reserved_size += size_child  # Add child reserved size to total
                         print(f"{next_line.rstrip()}\t {size_child} ({size_child / (2**20):.2f} MB)")
 
         # Exclude lines that don't contain 'Reserved' (case-insensitive) and do not cause an indentation change
@@ -131,7 +132,5 @@ def main():
     else:
         parse_full_iomem(args.file, args.t, args.s)
 
-
 if __name__ == "__main__":
     main()
-
