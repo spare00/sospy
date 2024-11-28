@@ -14,6 +14,7 @@ args = parser.parse_args()
 # Define categories
 system_ram_total = 0
 device_regions_total = 0
+crash_kernel_total = 0
 reserved_ranges = []  # Store all reserved ranges as tuples of (start, end)
 
 # Try to open and read the file
@@ -32,7 +33,9 @@ try:
                 if "system ram" in description:
                     system_ram_total += size
                 elif "reserved" in description:
-                    reserved_ranges.append((start_addr, end_addr))  # Collect all reserved ranges
+                    reserved_ranges.append((start_addr, end_addr))
+                elif "crash kernel" in description:
+                    crash_kernel_total += size
                 else:
                     device_regions_total += size
 except FileNotFoundError:
@@ -66,8 +69,9 @@ reserved_total = sum(end - start + 1 for start, end in consolidated_reserved_ran
 system_ram_mb = system_ram_total / (1024 * 1024)
 reserved_mb = reserved_total / (1024 * 1024)
 device_regions_mb = device_regions_total / (1024 * 1024)
-
+crash_kernel_mb = crash_kernel_total / (1024 * 1024)
 # Print results
 print(f"System RAM: {system_ram_mb:.2f} MB")
 print(f"Reserved Memory: {reserved_mb:.2f} MB")
 print(f"Device Regions: {device_regions_mb:.2f} MB")
+print(f"Crash Kernel: {crash_kernel_mb:.2f} MB")
