@@ -12,7 +12,17 @@ def parse_page_owner_file(filename):
 
     allocations_by_module = defaultdict(lambda: {'allocations': defaultdict(int), 'pages': 0})
     allocations_by_order = defaultdict(int)
-    calltraces = defaultdict(lambda: {'count': 0, 'pages': 0, 'calltrace': []})
+    calltraces = defaultdict(
+        lambda: {
+            'count': 0,
+            'pages': 0,
+            'calltrace': [],
+            'pid': None,
+            'tgid': None,
+            'process': None,
+            'timestamp': None,
+        }
+    )
 
     current_allocation = {}
     current_calltrace = []
@@ -23,18 +33,41 @@ def parse_page_owner_file(filename):
         line = line.strip()
 
         if line.startswith("Page allocated"):
-            # Extract order and mask
-            match = re.search(r"order (\d+), mask (.+)", line)
-            if match:
-                current_allocation = {
-                    'order': int(match.group(1)),
-                    'mask': match.group(2),
-                }
+            # Reset current_allocation for each new allocation
+            current_allocation = {
+                'order': None,
+                'mask': None,
+                'pid': None,
+                'tgid': None,
+                'process': None,
+                'timestamp': None,
+            }
+            match = re.search(
+                r"order (\d+), mask (0x[0-9a-fA-F]+(?:\([^\)]*\))?)(?:, pid (\d+), tgid (\d+) \((.+?)\), ts (\d+) ns)?",
+                line
+            )
+            if not match:
+                print(f"Warning: Failed to match allocation line: {line}")
+                continue
+
+            # Update allocation information with matched data
+            current_allocation.update({
+                'order': int(match.group(1)),
+                'mask': match.group(2),
+                'pid': int(match.group(3)) if match.group(3) else None,
+                'tgid': int(match.group(4)) if match.group(4) else None,
+                'process': match.group(5) if match.group(5) else None,
+                'timestamp': int(match.group(6)) if match.group(6) else None,
+            })
             trace_active = True
             modules_in_trace.clear()  # Reset modules for the new trace
 
         elif line.startswith("PFN"):
-            # End of the allocation section
+            # Extract node and zone information from the flags (if present)
+            flags_match = re.search(r"Flags .*?node=(\d+).*?zone=(\d+)", line)
+            if flags_match:
+                current_allocation['node'] = int(flags_match.group(1))
+                current_allocation['zone'] = int(flags_match.group(2))
             if 'order' in current_allocation:
                 order = current_allocation['order']
                 allocations_by_order[order] += 1
@@ -52,9 +85,15 @@ def parse_page_owner_file(filename):
                 # End of the call trace
                 trace_key = "\n".join(current_calltrace)
                 pages = 1 << current_allocation.get('order', 0)
+
+                # Update calltrace data
                 calltraces[trace_key]['count'] += 1
                 calltraces[trace_key]['pages'] += pages
                 calltraces[trace_key]['calltrace'] = current_calltrace
+                calltraces[trace_key]['pid'] = current_allocation.get('pid')
+                calltraces[trace_key]['tgid'] = current_allocation.get('tgid')
+                calltraces[trace_key]['process'] = current_allocation.get('process')
+                calltraces[trace_key]['timestamp'] = current_allocation.get('timestamp')
 
                 # Update allocations for each unique module in this trace
                 for module in modules_in_trace:
@@ -65,6 +104,7 @@ def parse_page_owner_file(filename):
                 trace_active = False
 
     return allocations_by_module, allocations_by_order, calltraces
+
 def show_allocations_by_module(allocations):
     print(f"{'Module':<20}{'Allocations':>12}{'Memory (GB)':>15}")
     print("=" * 47)
@@ -126,6 +166,7 @@ def show_summary(allocations_by_order):
     print(f"Total Memory (GB): {total_memory_gb:.2f}")
 
 def show_top_call_traces(calltraces, top_n=3):
+
     """Show the top N most commonly seen call traces."""
     sorted_traces = sorted(calltraces.items(), key=lambda x: x[1]['count'], reverse=True)[:top_n]
     print(f"Top {top_n} most commonly seen call traces:\n")
@@ -133,6 +174,8 @@ def show_top_call_traces(calltraces, top_n=3):
         pages = data['pages']
         memory_gb = pages * 4 / (1024 ** 2)  # Convert pages to GB
         print(f"Call Trace #{i} (Seen {data['count']} times, {pages} pages, {memory_gb:.2f} GB):")
+        if 'process' in data and data['process']:
+            print(f"  Process: {data['process']} (pid={data.get('pid')}, tgid={data.get('tgid')}, timestamp={data.get('timestamp')})")
         print(trace)
         print()
 
