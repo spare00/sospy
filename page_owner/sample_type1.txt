@@ -1,0 +1,244 @@
+Page allocated via order 10, mask 0x6000c1(GFP_KERNEL|GFP_DMA)
+PFN 3072 type Unmovable Block 6 type Unmovable Flags 0x7ffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1216/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ alloc_page_interleave+0x13/0x70
+ atomic_pool_expand+0x4e/0x160
+ __dma_atomic_pool_init+0x44/0x90
+ dma_atomic_pool_init+0xa9/0x14b
+ do_one_initcall+0x46/0x1c3
+ kernel_init_freeable+0x1af/0x25a
+ kernel_init+0xa/0xf9
+ ret_from_fork+0x1f/0x40
+
+Page allocated via order 0, mask 0x486220(GFP_ATOMIC|__GFP_NOWARN|__GFP_COMP|__GFP_MEMALLOC)
+PFN 16384 type Unmovable Block 32 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ ixgbe_alloc_rx_buffers+0xd9/0x1c0 [ixgbe]
+ ixgbe_clean_rx_irq+0x31a/0xa30 [ixgbe]
+ ixgbe_poll+0x3ba/0x710 [ixgbe]
+ net_rx_action+0x149/0x3b0
+ __do_softirq+0xd7/0x2d6
+ irq_exit+0xf7/0x100
+ do_IRQ+0x7f/0xd0
+ ret_from_intr+0x0/0x1d
+ native_safe_halt+0xe/0x10
+ default_idle+0xa/0x10
+ default_idle_call+0x40/0xf0
+ do_idle+0x1f4/0x260
+ cpu_startup_entry+0x6f/0x80
+
+Page allocated via order 6, mask 0x6000c0(GFP_KERNEL)
+PFN 189504 type Unmovable Block 370 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1216/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ dma_direct_alloc_pages+0xb4/0x2a0
+ i40iw_allocate_dma_mem+0x37/0x50 [i40iw]
+ i40iw_open.part.14+0xd06/0x14b0 [i40iw]
+ i40e_client_subtask+0xb4/0x120 [i40e]
+ i40e_service_task+0x7e3/0xfc0 [i40e]
+ process_one_work+0x1a7/0x360
+ worker_thread+0x30/0x390
+ kthread+0x116/0x130
+ ret_from_fork+0x1f/0x40
+
+Page allocated via order 6, mask 0x6000c0(GFP_KERNEL)
+PFN 189568 type Unmovable Block 370 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1216/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ dma_direct_alloc_pages+0xb4/0x2a0
+ i40iw_allocate_dma_mem+0x37/0x50 [i40iw]
+ i40iw_open.part.14+0xd06/0x14b0 [i40iw]
+ i40e_client_subtask+0xb4/0x120 [i40e]
+ i40e_service_task+0x7e3/0xfc0 [i40e]
+ process_one_work+0x1a7/0x360
+ worker_thread+0x30/0x390
+ kthread+0x116/0x130
+ ret_from_fork+0x1f/0x40
+
+Page allocated via order 0, mask 0x486220(GFP_ATOMIC|__GFP_NOWARN|__GFP_COMP|__GFP_MEMALLOC)
+PFN 16386 type Unmovable Block 32 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ ixgbe_alloc_rx_buffers+0xd9/0x1c0 [ixgbe]
+ ixgbe_clean_rx_irq+0x31a/0xa30 [ixgbe]
+ ixgbe_poll+0x3ba/0x710 [ixgbe]
+ net_rx_action+0x149/0x3b0
+ __do_softirq+0xd7/0x2d6
+ irq_exit+0xf7/0x100
+ do_IRQ+0x7f/0xd0
+ ret_from_intr+0x0/0x1d
+ native_safe_halt+0xe/0x10
+ default_idle+0xa/0x10
+ default_idle_call+0x40/0xf0
+ do_idle+0x1f4/0x260
+ cpu_startup_entry+0x6f/0x80
+
+Page allocated via order 0, mask 0x486220(GFP_ATOMIC|__GFP_NOWARN|__GFP_COMP|__GFP_MEMALLOC)
+PFN 16389 type Unmovable Block 32 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ ixgbe_alloc_rx_buffers+0xd9/0x1c0 [ixgbe]
+ ixgbe_clean_rx_irq+0x31a/0xa30 [ixgbe]
+ ixgbe_poll+0x3ba/0x710 [ixgbe]
+ net_rx_action+0x149/0x3b0
+ __do_softirq+0xd7/0x2d6
+ irq_exit+0xf7/0x100
+ do_IRQ+0x7f/0xd0
+ ret_from_intr+0x0/0x1d
+ native_safe_halt+0xe/0x10
+ default_idle+0xa/0x10
+ default_idle_call+0x40/0xf0
+ do_idle+0x1f4/0x260
+ cpu_startup_entry+0x6f/0x80
+
+Page allocated via order 0, mask 0x486220(GFP_ATOMIC|__GFP_NOWARN|__GFP_COMP|__GFP_MEMALLOC)
+PFN 16392 type Unmovable Block 32 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ i40e_alloc_rx_buffers+0xcf/0x1e0 [i40e]
+ i40e_clean_rx_irq+0x5d5/0xa60 [i40e]
+ i40e_napi_poll+0x10e/0x880 [i40e]
+ net_rx_action+0x149/0x3b0
+ __do_softirq+0xd7/0x2d6
+ irq_exit+0xf7/0x100
+ do_IRQ+0x7f/0xd0
+ ret_from_intr+0x0/0x1d
+ native_safe_halt+0xe/0x10
+ default_idle+0xa/0x10
+ default_idle_call+0x40/0xf0
+ do_idle+0x1f4/0x260
+ cpu_startup_entry+0x6f/0x80
+
+Page allocated via order 0, mask 0x600240(GFP_NOFS|__GFP_NOWARN)
+PFN 190050 type Unmovable Block 371 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ xfs_buf_allocate_memory+0x197/0x390 [xfs]
+ xfs_buf_get_map+0xa1/0x2d0 [xfs]
+ xfs_buf_read_map+0x55/0x2f0 [xfs]
+ xfs_trans_read_buf_map+0x124/0x360 [xfs]
+ xfs_imap_to_bp+0x67/0xd0 [xfs]
+ xfs_iread+0x82/0x1c0 [xfs]
+ xfs_iget+0x215/0x980 [xfs]
+ xfs_lookup+0xdf/0x120 [xfs]
+ xfs_vn_lookup+0x70/0xa0 [xfs]
+ __lookup_slow+0x97/0x150
+ lookup_slow+0x35/0x50
+ walk_component+0x1bf/0x2f0
+ path_lookupat.isra.49+0x75/0x200
+
+Page allocated via order 0, mask 0x600240(GFP_NOFS|__GFP_NOWARN)
+PFN 190051 type Unmovable Block 371 type Unmovable Flags 0xfffffc0000000()
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ xfs_buf_allocate_memory+0x197/0x390 [xfs]
+ xfs_buf_get_map+0xa1/0x2d0 [xfs]
+ xfs_buf_read_map+0x55/0x2f0 [xfs]
+ xfs_trans_read_buf_map+0x124/0x360 [xfs]
+ xfs_imap_to_bp+0x67/0xd0 [xfs]
+ xfs_iread+0x82/0x1c0 [xfs]
+ xfs_iget+0x215/0x980 [xfs]
+ xfs_lookup+0xdf/0x120 [xfs]
+ xfs_vn_lookup+0x70/0xa0 [xfs]
+ __lookup_slow+0x97/0x150
+ lookup_slow+0x35/0x50
+ walk_component+0x1bf/0x2f0
+ path_lookupat.isra.49+0x75/0x200
+
+Page allocated via order 2, mask 0x415280(GFP_NOWAIT|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC)
+PFN 66592 type Unmovable Block 130 type Unmovable Flags 0xfffffc0008100(slab|head)
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1216/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ allocate_slab+0x35b/0x4c0
+ ___slab_alloc+0x401/0x5b0
+ __slab_alloc+0x1c/0x30
+ kmem_cache_alloc+0x231/0x270
+ mempool_alloc+0x67/0x190
+ qla24xx_send_mb_cmd.part.12+0x91/0x380 [qla2xxx]
+ qla24xx_get_isp_stats+0xb8/0x160 [qla2xxx]
+ qla2x00_get_fc_host_stats+0x38b/0x3f0 [qla2xxx]
+ fc_stat_show.isra.22+0x4e/0x80 [scsi_transport_fc]
+ dev_attr_show+0x1c/0x40
+ sysfs_kf_seq_show+0x9b/0x100
+ seq_read+0x163/0x420
+ vfs_read+0x91/0x140
+
+Page allocated via order 2, mask 0x415280(GFP_NOWAIT|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC)
+PFN 66592 type Unmovable Block 130 type Unmovable Flags 0xfffffc0008100(slab|head)
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1216/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ allocate_slab+0x35b/0x4c0
+ ___slab_alloc+0x401/0x5b0
+ __slab_alloc+0x1c/0x30
+ kmem_cache_alloc+0x231/0x270
+ mempool_alloc+0x67/0x190
+ qla24xx_send_mb_cmd.part.12+0x91/0x380 [qla2xxx]
+ qla24xx_get_isp_stats+0xb8/0x160 [qla2xxx]
+ qla2x00_get_fc_host_stats+0x38b/0x3f0 [qla2xxx]
+ fc_stat_show.isra.22+0x4e/0x80 [scsi_transport_fc]
+ dev_attr_show+0x1c/0x40
+ sysfs_kf_seq_show+0x9b/0x100
+ seq_read+0x163/0x420
+ vfs_read+0x91/0x140
+
+Page allocated via order 2, mask 0x415280(GFP_NOWAIT|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC)
+PFN 96568 type Unmovable Block 188 type Unmovable Flags 0xfffffc0008100(slab|head)
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1216/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ allocate_slab+0x35b/0x4c0
+ ___slab_alloc+0x401/0x5b0
+ __slab_alloc+0x1c/0x30
+ kmem_cache_alloc+0x231/0x270
+ mempool_alloc+0x67/0x190
+ qla24xx_send_mb_cmd.part.12+0x91/0x380 [qla2xxx]
+ qla24xx_get_isp_stats+0xb8/0x160 [qla2xxx]
+ qla2x00_get_fc_host_stats+0x38b/0x3f0 [qla2xxx]
+ fc_stat_show.isra.22+0x4e/0x80 [scsi_transport_fc]
+ dev_attr_show+0x1c/0x40
+ sysfs_kf_seq_show+0x9b/0x100
+ seq_read+0x163/0x420
+ vfs_read+0x91/0x140
+
+Page allocated via order 0, mask 0x62124a(GFP_NOFS|__GFP_HIGHMEM|__GFP_NOWARN|__GFP_NORETRY|__GFP_HARDWALL|__GFP_MOVABLE)
+PFN 8650590 type Movable Block 16895 type Movable Flags 0x57ffffc018002c(referenced|uptodate|lru|unevictable|mlocked)
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ __do_page_cache_readahead+0xb5/0x1e0
+ filemap_fault+0x783/0xa20
+ __xfs_filemap_fault+0x6d/0x200 [xfs]
+ __do_fault+0x38/0xb0
+ handle_pte_fault+0x568/0xab0
+ __handle_mm_fault+0x432/0x730
+ handle_mm_fault+0xc2/0x1d0
+ __do_page_fault+0x1ed/0x4c0
+ do_page_fault+0x37/0x130
+ page_fault+0x1e/0x30
+
+Page allocated via order 0, mask 0x6200ca(GFP_HIGHUSER_MOVABLE)
+PFN 8650592 type Movable Block 16895 type Movable Flags 0x57ffffc0040028(uptodate|lru|swapbacked)
+ prep_new_page+0x64/0xe0
+ get_page_from_freelist+0x1118/0x1360
+ __alloc_pages_nodemask+0x12d/0x2c0
+ alloc_pages_vma+0x74/0x1d0
+ handle_pte_fault+0xe3/0xab0
+ __handle_mm_fault+0x432/0x730
+ handle_mm_fault+0xc2/0x1d0
+ __do_page_fault+0x1ed/0x4c0
+ do_page_fault+0x37/0x130
+ page_fault+0x1e/0x30
+

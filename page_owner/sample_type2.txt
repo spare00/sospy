@@ -1,0 +1,695 @@
+iPage allocated via order 6, mask 0x6000c1(GFP_KERNEL|GFP_DMA), pid 1, tgid 1 (swapper/0), ts 377764025 ns
+PFN 256 type Unmovable Block 0 type Unmovable Flags 0x7ffffc0000000(node=0|zone=0|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ alloc_page_interleave+0x13/0x70
+ atomic_pool_expand+0x4e/0x170
+ __dma_atomic_pool_init+0x44/0x94
+ dma_atomic_pool_init+0xb0/0x150
+ do_one_initcall+0x46/0x1d0
+ kernel_init_freeable+0x1b9/0x232
+ kernel_init+0xa/0x104
+ ret_from_fork+0x35/0x40
+
+Page allocated via order 2, mask 0x152c0(__GFP_IO|__GFP_FS|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 887, tgid 887 (virt-what), ts 33393451794 ns
+PFN 23404 type Unmovable Block 45 type Unmovable Flags 0xfffffc0008100(slab|head|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc+0x252/0x280
+ copy_process+0xb80/0x1b50
+ _do_fork+0x8b/0x340
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+Slab cache page
+
+Page allocated via order 1, mask 0x15640(__GFP_IO|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 776, tgid 776 (tuned), ts 31874759913 ns
+PFN 23414 type Unmovable Block 45 type Unmovable Flags 0xfffffc0008100(slab|head|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ __kmalloc+0x27f/0x2d0
+ kmem_alloc+0x6d/0x140 [xfs]
+ kmem_alloc_large+0x27/0x120 [xfs]
+ xlog_cil_commit+0x124/0x880 [xfs]
+ __xfs_trans_commit+0xa7/0x300 [xfs]
+ xfs_vn_update_time+0x157/0x1e0 [xfs]
+ touch_atime+0xc2/0xf0
+ generic_file_buffered_read+0x84e/0xbb0
+ xfs_file_buffered_read+0x3e/0xb0 [xfs]
+ xfs_file_read_iter+0x6e/0xe0 [xfs]
+ new_sync_read+0x10f/0x160
+
+Page allocated via order 4, mask 0x60c0c0(GFP_KERNEL|__GFP_COMP|__GFP_ZERO), pid 1, tgid 1 (systemd), ts 10434348702 ns
+PFN 25104 type Unmovable Block 49 type Unmovable Flags 0xfffffc0008000(head|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ kmalloc_order+0x28/0x90
+ kmalloc_order_trace+0x1d/0xb0
+ __kmalloc+0x25c/0x2d0
+ cond_read_av_list.isra.6+0x97/0x150
+ cond_read_list+0x1a6/0x250
+ policydb_read+0x52d/0xf70
+ security_load_policy+0x8f/0x460
+ sel_write_load+0xf1/0xa50
+ vfs_write+0xa5/0x1b0
+ ksys_write+0x4f/0xb0
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+
+Page allocated via order 5, mask 0x60d2c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_ZERO), pid 1, tgid 1 (systemd), ts 10642316558 ns
+PFN 34272 type Unmovable Block 66 type Unmovable Flags 0xfffffc0008000(head|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ kmalloc_large_node+0x3c/0xa0
+ __kmalloc_node+0x239/0x2b0
+ kvmalloc_node+0x3e/0x70
+ policydb_read+0xd51/0xf70
+ security_load_policy+0x8f/0x460
+ sel_write_load+0xf1/0xa50
+ vfs_write+0xa5/0x1b0
+ ksys_write+0x4f/0xb0
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+
+Page allocated via order 6, mask 0x60d2c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_ZERO), pid 1, tgid 1 (systemd), ts 10195865620 ns
+PFN 35264 type Unmovable Block 68 type Unmovable Flags 0xfffffc0008000(head|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ kmalloc_large_node+0x3c/0xa0
+ __kmalloc_node+0x239/0x2b0
+ kvmalloc_node+0x3e/0x70
+ avtab_alloc+0x51/0xc0
+ avtab_read+0x50/0xe0
+ policydb_read+0x50e/0xf70
+ security_load_policy+0x8f/0x460
+ sel_write_load+0xf1/0xa50
+ vfs_write+0xa5/0x1b0
+ ksys_write+0x4f/0xb0
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+
+Page allocated via order 9, mask 0x742ca(GFP_TRANSHUGE_LIGHT|__GFP_THISNODE), pid 1070, tgid 1070 (rsyslogd), ts 37759866135 ns
+PFN 66048 type Movable Block 129 type Movable Flags 0xfffffc0048028(uptodate|lru|head|swapbacked|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ do_huge_pmd_anonymous_page+0x15e/0x920
+ __handle_mm_fault+0x6c0/0x6d0
+ handle_mm_fault+0xca/0x2a0
+ __do_page_fault+0x1d0/0x420
+ do_page_fault+0x37/0x12d
+ page_fault+0x1e/0x30
+Charged to memcg rsyslog.service
+
+Page allocated via order 9, mask 0x2742ca(GFP_TRANSHUGE|__GFP_THISNODE), pid 34, tgid 34 (khugepaged), ts 25866378697 ns
+PFN 72704 type Movable Block 142 type Movable Flags 0xfffffc0048028(uptodate|lru|head|swapbacked|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ khugepaged_alloc_page+0x17/0x50
+ collapse_huge_page+0x93/0x1020
+ khugepaged+0xed9/0x11e0
+ kthread+0x134/0x150
+ ret_from_fork+0x35/0x40
+Charged to memcg polkit.service
+
+Page allocated via order 9, mask 0x742ca(GFP_TRANSHUGE_LIGHT|__GFP_THISNODE), pid 1119, tgid 1070 (in:imjournal), ts 37842063767 ns
+PFN 82432 type Movable Block 161 type Movable Flags 0xfffffc0048028(uptodate|lru|head|swapbacked|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ do_huge_pmd_anonymous_page+0x15e/0x920
+ __handle_mm_fault+0x6c0/0x6d0
+ handle_mm_fault+0xca/0x2a0
+ __do_page_fault+0x1d0/0x420
+ do_page_fault+0x37/0x12d
+ page_fault+0x1e/0x30
+Charged to memcg rsyslog.service
+
+Page allocated via order 0, mask 0x62124a(GFP_NOFS|__GFP_HIGHMEM|__GFP_NOWARN|__GFP_NORETRY|__GFP_HARDWALL|__GFP_MOVABLE), pid 1, tgid 1 (systemd), ts 10154247655 ns
+PFN 4096 type Movable Block 8 type Movable Flags 0xfffffc000002c(referenced|uptodate|lru|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ page_cache_readahead_unbounded+0x134/0x250
+ filemap_fault+0x3e4/0xa30
+ __xfs_filemap_fault+0x6d/0x200 [xfs]
+ __do_fault+0x38/0xc0
+ handle_pte_fault+0x55d/0x880
+ __handle_mm_fault+0x552/0x6d0
+ handle_mm_fault+0xca/0x2a0
+ __do_page_fault+0x1d0/0x420
+ do_page_fault+0x37/0x12d
+ page_fault+0x1e/0x30
+ copy_user_generic_string+0x2c/0x40
+ _copy_from_user+0x2c/0x60
+ sel_write_load+0xd4/0xa50
+Charged to memcg init.scope
+
+Page allocated via order 0, mask 0x6082c2(GFP_KERNEL|__GFP_HIGHMEM|__GFP_NOWARN|__GFP_ZERO), pid 763, tgid 763 (NetworkM
+anager), ts 31416233331 ns
+PFN 23063 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __vmalloc_node_range+0x13f/0x250
+ __vmalloc_node+0x36/0x60
+ e1000_setup_all_tx_resources+0x83/0x2a0 [e1000]
+ e1000_open+0x33/0x1a0 [e1000]
+ __dev_open+0xd1/0x160
+ __dev_change_flags+0x1b5/0x220
+ dev_change_flags+0x21/0x60
+ do_setlink+0x7d8/0xfb0
+ __rtnl_newlink+0x48b/0x890
+ rtnl_newlink+0x43/0x70
+ rtnetlink_rcv_msg+0x2b5/0x370
+ netlink_rcv_skb+0x54/0x110
+ netlink_unicast+0x19a/0x230
+
+Page allocated via order 0, mask 0x7080c0(GFP_KERNEL_ACCOUNT|__GFP_ZERO), pid 1741, tgid 1741 (rtkit-daemon), ts 214897526329 ns
+PFN 23064 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ pte_alloc_one+0x14/0x70
+ handle_pte_fault+0x7e9/0x880
+ __handle_mm_fault+0x552/0x6d0
+ handle_mm_fault+0xca/0x2a0
+ __do_page_fault+0x1d0/0x420
+ do_page_fault+0x37/0x12d
+ page_fault+0x1e/0x30
+Charged (via objcg) to memcg rtkit-daemon.service
+
+Page allocated via order 0, mask 0x7080c0(GFP_KERNEL_ACCOUNT|__GFP_ZERO), pid 1741, tgid 1741 (rtkit-daemon), ts 214895375122 ns
+PFN 23065 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ pte_alloc_one+0x14/0x70
+ handle_pte_fault+0x7e9/0x880
+ __handle_mm_fault+0x552/0x6d0
+ handle_mm_fault+0xca/0x2a0
+ __do_page_fault+0x1d0/0x420
+ do_page_fault+0x37/0x12d
+ page_fault+0x1e/0x30
+Charged (via objcg) to memcg rtkit-daemon.service
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 872, tgid 872 (modprobe), ts 32955
+646752 ns
+PFN 23743 type Unmovable Block 46 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ __kmalloc_track_caller+0x21f/0x250
+ kmemdup+0x17/0x40
+ nf_conntrack_tstamp_pernet_init+0x2d/0x90 [nf_conntrack]
+ nf_conntrack_init_net+0xc0/0x150 [nf_conntrack]
+ nf_conntrack_pernet_init+0x15/0x230 [nf_conntrack]
+ ops_init+0x3a/0x110
+ register_pernet_operations+0x114/0x210
+ register_pernet_subsys+0x24/0x40
+ nf_xfrm_me_harder+0x62/0x180 [nf_nat]
+ do_one_initcall+0x46/0x1d0
+ do_init_module+0x5a/0x230
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 976, tgid 976 (iptables-restor), ts 33675186501 ns
+PFN 23744 type Unmovable Block 46 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ __kmalloc+0x27f/0x2d0
+ nft_trans_alloc_gfp+0x1c/0x70 [nf_tables]
+ nf_tables_newchain+0x285/0x5d0 [nf_tables]
+ nfnetlink_rcv_batch+0x59c/0x720 [nfnetlink]
+ nfnetlink_rcv+0x115/0x161 [nfnetlink]
+ netlink_unicast+0x19a/0x230
+ netlink_sendmsg+0x204/0x3d0
+ sock_sendmsg+0x50/0x60
+ ____sys_sendmsg+0x22a/0x250
+ ___sys_sendmsg+0x7c/0xc0
+ __sys_sendmsg+0x57/0xa0
+
+Page allocated via order 0, mask 0x600240(GFP_NOFS|__GFP_NOWARN), pid 776, tgid 776 (tuned), ts 32921214773 ns
+PFN 23745 type Unmovable Block 46 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ xfs_buf_alloc_pages+0xd1/0x1d0 [xfs]
+ xfs_buf_get_map+0x2e7/0x4a0 [xfs]
+ xfs_buf_read_map+0x53/0x320 [xfs]
+ xfs_trans_read_buf_map+0x128/0x360 [xfs]
+ xfs_imap_to_bp+0x4b/0x70 [xfs]
+ xfs_iget+0x362/0x9e0 [xfs]
+ xfs_lookup+0xe3/0x120 [xfs]
+ xfs_vn_lookup+0x74/0xb0 [xfs]
+ __lookup_slow+0x97/0x160
+ lookup_slow+0x35/0x50
+ walk_component+0x1c3/0x300
+ link_path_walk+0x2c1/0x550
+ path_openat+0xaa/0x1580
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 509, tgid 509 (kworker/0:3), ts 18
+607208595 ns
+PFN 27305 type Unmovable Block 53 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc+0x252/0x280
+ __kernfs_new_node+0x5d/0x1e0
+ kernfs_new_node+0x31/0x50
+ __kernfs_create_file+0x30/0xc0
+ sysfs_add_file_mode_ns+0x87/0x180
+ sysfs_merge_group+0x89/0x100
+ dpm_sysfs_add+0xe0/0x120
+ device_add+0x3ad/0x800
+ snd_register_device+0xec/0x150 [snd]
+ snd_pcm_dev_register+0xe7/0x210 [snd_pcm]
+ __snd_device_register.part.1+0x1b/0x30 [snd]
+
+Page allocated via order 0, mask 0x6212c0(GFP_USER|__GFP_NOWARN|__GFP_NORETRY), pid 578, tgid 578 (systemd-udevd), ts 17942717552 ns
+PFN 27306 type Unmovable Block 53 type Unmovable Flags 0xfffffc001002c(referenced|uptodate|lru|mappedtodisk|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ page_cache_readahead_unbounded+0x134/0x250
+ generic_file_buffered_read+0x561/0xbb0
+ blkdev_read_iter+0x41/0x60
+ new_sync_read+0x10f/0x160
+ vfs_read+0x91/0x150
+ ksys_read+0x4f/0xb0
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+Charged to memcg systemd-udevd.service
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 1595
+3446602 ns
+PFN 27455 type Unmovable Block 53 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc_trace+0x251/0x280
+ drm_atomic_helper_setup_commit+0x189/0x510 [drm_kms_helper]
+ drm_atomic_helper_commit+0x41/0x110 [drm_kms_helper]
+ drm_atomic_commit+0x96/0xc0 [drm]
+ drm_atomic_helper_dirtyfb+0x212/0x270 [drm_kms_helper]
+ drm_mode_dirtyfb_ioctl+0x181/0x1b0 [drm]
+ drm_ioctl_kernel+0xb5/0x140 [drm]
+ drm_ioctl+0x23d/0x440 [drm]
+ do_vfs_ioctl+0xa4/0x690
+ ksys_ioctl+0x64/0xa0
+ __x64_sys_ioctl+0x16/0x20
+
+Page allocated via order 0, mask 0x6212c0(GFP_USER|__GFP_NOWARN|__GFP_NORETRY), pid 578, tgid 578 (systemd-udevd), ts 17952973670 ns
+PFN 27456 type Unmovable Block 53 type Unmovable Flags 0xfffffc001002c(referenced|uptodate|lru|mappedtodisk|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ page_cache_readahead_unbounded+0x134/0x250
+ generic_file_buffered_read+0x561/0xbb0
+ blkdev_read_iter+0x41/0x60
+ new_sync_read+0x10f/0x160
+ vfs_read+0x91/0x150
+ ksys_read+0x4f/0xb0
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+Charged to memcg systemd-udevd.service
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 617, tgid 617 (modprobe), ts 18594
+557684 ns
+PFN 32783 type Unmovable Block 64 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc_trace+0x251/0x280
+ regcache_rbtree_write+0x26e/0x450
+ _regmap_read+0xd4/0x140
+ _regmap_update_bits+0xb4/0xf0
+ regmap_update_bits_base+0x5b/0x90
+ reg_raw_update_once+0xcf/0xf0 [snd_hda_core]
+ snd_hdac_regmap_update_raw_once+0x1e/0x70 [snd_hda_core]
+ snd_hda_codec_amp_init_stereo+0x46/0x80 [snd_hda_codec]
+ snd_hda_activate_path+0x1c5/0x3d0 [snd_hda_codec_generic]
+ snd_hda_gen_init+0x393/0x6a0 [snd_hda_codec_generic]
+ snd_hda_codec_build_controls+0x4b/0x220 [snd_hda_codec]
+
+Page allocated via order 0, mask 0x6212c0(GFP_USER|__GFP_NOWARN|__GFP_NORETRY), pid 578, tgid 578 (systemd-udevd), ts 17942135533 ns
+PFN 32784 type Unmovable Block 64 type Unmovable Flags 0xfffffc001002c(referenced|uptodate|lru|mappedtodisk|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ page_cache_readahead_unbounded+0x134/0x250
+ generic_file_buffered_read+0x561/0xbb0
+ blkdev_read_iter+0x41/0x60
+ new_sync_read+0x10f/0x160
+ vfs_read+0x91/0x150
+ ksys_read+0x4f/0xb0
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+Charged to memcg systemd-udevd.service
+
+Page allocated via order 0, mask 0x6080c0(GFP_KERNEL|__GFP_ZERO), pid 576, tgid 576 (systemd-udevd), ts 17726197725 ns
+PFN 32785 type Unmovable Block 64 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __get_free_pages+0xa/0x40
+ ftrace_process_locs+0xf5/0x430
+ load_module+0x1241/0x18c0
+ __do_sys_init_module+0x13b/0x180
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+
+Page allocated via order 0, mask 0x601250(GFP_NOFS|__GFP_NOWARN|__GFP_NORETRY|__GFP_RECLAIMABLE), pid 13580, tgid 13580
+(updatedb), ts 70155606745782 ns
+PFN 40444 type Reclaimable Block 78 type Reclaimable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc+0x252/0x280
+ alloc_buffer_head+0x1d/0x60
+ alloc_page_buffers+0xa3/0x140
+ __getblk_gfp+0x167/0x290
+ __breadahead+0x23/0x70
+ fat__get_entry+0x138/0x230 [fat]
+ fat_get_short_entry+0x5e/0xb0 [fat]
+ fat_subdirs+0x59/0x90 [fat]
+ fat_fill_inode+0x2ba/0x400 [fat]
+ fat_build_inode+0x94/0x110 [fat]
+ vfat_lookup+0xe8/0x1d0 [vfat]
+Slab cache page
+
+Page allocated via order 0, mask 0x6012d0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY|__GFP_RECLAIMABLE), pid 13580, tgid 13580 (updatedb), ts 70155619028103 ns
+PFN 40445 type Reclaimable Block 78 type Reclaimable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc+0x252/0x280
+ __d_alloc+0x22/0x1d0
+ d_alloc+0x1b/0xa0
+ d_alloc_parallel+0x57/0x390
+ __lookup_slow+0x6e/0x160
+ lookup_slow+0x35/0x50
+ walk_component+0x1c3/0x300
+ path_lookupat.isra.43+0x79/0x220
+ filename_lookup.part.58+0xa0/0x170
+ vfs_statx+0x74/0xe0
+ __do_sys_newlstat+0x39/0x70
+Slab cache page
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 3178
+8554120 ns
+PFN 23348 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ __kmalloc+0x27f/0x2d0
+ virtio_gpu_array_alloc+0x1d/0x40 [virtio_gpu]
+ virtio_gpu_primary_plane_update+0x348/0x400 [virtio_gpu]
+ drm_atomic_helper_commit_planes+0xb6/0x230 [drm_kms_helper]
+ drm_atomic_helper_commit_tail+0x26/0x60 [drm_kms_helper]
+ commit_tail+0xca/0x110 [drm_kms_helper]
+ drm_atomic_helper_commit+0x10b/0x110 [drm_kms_helper]
+ drm_atomic_commit+0x96/0xc0 [drm]
+ drm_atomic_helper_dirtyfb+0x212/0x270 [drm_kms_helper]
+ drm_mode_dirtyfb_ioctl+0x181/0x1b0 [drm]
+ drm_ioctl_kernel+0xb5/0x140 [drm]
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 803, tgid 803 (nm-dispatcher), ts 31491345883 ns
+PFN 23349 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc+0x252/0x280
+ vm_area_dup+0x1a/0x60
+ dup_mm+0x271/0x570
+ copy_process+0x1a3b/0x1b50
+ _do_fork+0x8b/0x340
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+Slab cache page
+
+Page allocated via order 0, mask 0x411200(GFP_NOWAIT|__GFP_NOWARN|__GFP_NORETRY|__GFP_NOMEMALLOC), pid 449, tgid 449 (xf
+saild/dm-0), ts 77950447252244 ns
+PFN 30848 type Unmovable Block 60 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc+0x252/0x280
+ mempool_alloc+0x67/0x180
+ bio_alloc_bioset+0x14e/0x220
+ bio_clone_fast+0x19/0x70
+ dm_make_request+0x8d/0x4d0 [dm_mod]
+ generic_make_request_no_check+0x202/0x330
+ submit_bio+0x3c/0x160
+ _xfs_buf_ioapply+0x2af/0x430 [xfs]
+ __xfs_buf_submit+0x63/0x1d0 [xfs]
+ xfs_buf_delwri_submit_buffers+0x10c/0x2a0 [xfs]
+ xfsaild+0x26f/0x8c0 [xfs]
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 15939, tgid 15939 (pgrep), ts 82006769595889 ns
+PFN 30849 type Unmovable Block 60 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc+0x252/0x280
+ vm_area_dup+0x1a/0x60
+ __split_vma+0x49/0x1a0
+ mprotect_fixup+0x273/0x2c0
+ do_mprotect_pkey+0x184/0x330
+ __x64_sys_mprotect+0x1b/0x30
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+Slab cache page
+
+Page allocated via order 0, mask 0x600240(GFP_NOFS|__GFP_NOWARN), pid 2352, tgid 2352 (bash), ts 781198318285 ns
+PFN 30850 type Unmovable Block 60 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ xfs_buf_alloc_pages+0xd1/0x1d0 [xfs]
+ xfs_buf_get_map+0x2e7/0x4a0 [xfs]
+ xfs_buf_read_map+0x53/0x320 [xfs]
+ xfs_trans_read_buf_map+0x128/0x360 [xfs]
+ xfs_imap_to_bp+0x4b/0x70 [xfs]
+ xfs_iget+0x362/0x9e0 [xfs]
+ xfs_lookup+0xe3/0x120 [xfs]
+ xfs_vn_lookup+0x74/0xb0 [xfs]
+ path_openat+0x7f7/0x1580
+ do_filp_open+0x93/0x100
+ do_sys_openat2+0x211/0x2b0
+ do_sys_open+0x4b/0x80
+ do_syscall_64+0x5b/0x1b0
+
+Page allocated via order 3, mask 0x495220(GFP_ATOMIC|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 0, tgi
+d 0 (swapper/1), ts 81014678744501 ns
+PFN 30952 type Unmovable Block 60 type Unmovable Flags 0xfffffc0008000(head|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ page_frag_alloc_align+0x83/0x190
+ __netdev_alloc_frag_align+0x68/0x90
+ e1000_alloc_frag+0x21/0x40 [e1000]
+ e1000_alloc_rx_buffers+0x8c/0x400 [e1000]
+ e1000_clean_rx_irq+0x3bd/0x470 [e1000]
+ e1000_clean+0x287/0x5d0 [e1000]
+ __napi_poll+0x2d/0x130
+ net_rx_action+0x252/0x320
+ __do_softirq+0xdc/0x2cf
+ irq_exit_rcu+0xc6/0xd0
+ irq_exit+0xa/0x10
+ do_IRQ+0x7f/0xd0
+ ret_from_intr+0x0/0x25
+
+Page allocated via order 3, mask 0x495220(GFP_ATOMIC|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 0, tgid 0 (swapper/1), ts 80698032917261 ns
+PFN 30960 type Unmovable Block 60 type Unmovable Flags 0xfffffc0008000(head|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x10c5/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ page_frag_alloc_align+0x83/0x190
+ __netdev_alloc_frag_align+0x68/0x90
+ e1000_alloc_frag+0x21/0x40 [e1000]
+ e1000_alloc_rx_buffers+0x8c/0x400 [e1000]
+ e1000_clean_rx_irq+0x3bd/0x470 [e1000]
+ e1000_clean+0x287/0x5d0 [e1000]
+ __napi_poll+0x2d/0x130
+ net_rx_action+0x252/0x320
+ __do_softirq+0xdc/0x2cf
+ irq_exit_rcu+0xc6/0xd0
+ irq_exit+0xa/0x10
+ do_IRQ+0x7f/0xd0
+ ret_from_intr+0x0/0x25
+
+Page allocated via order 0, mask 0x7080c0(GFP_KERNEL_ACCOUNT|__GFP_ZERO), pid 11321, tgid 11321 (login), ts 56348653246103 ns
+PFN 30968 type Unmovable Block 60 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ pte_alloc_one+0x14/0x70
+ handle_pte_fault+0x7e9/0x880
+ __handle_mm_fault+0x552/0x6d0
+ handle_mm_fault+0xca/0x2a0
+ __do_page_fault+0x1d0/0x420
+ do_page_fault+0x37/0x12d
+ page_fault+0x1e/0x30
+Charged (via objcg) to memcg getty@tty6.service
+
+Page allocated via order 0, mask 0x6046c0(GFP_KERNEL|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_COMP), pid 509, tgid 509 (kworker/0:3), ts 18390426517 ns
+PFN 21927 type Unmovable Block 42 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __dma_direct_alloc_pages.constprop.25+0x8a/0x120
+ dma_direct_alloc+0x5a/0x2a0
+ snd_dma_alloc_dir_pages+0x50/0x80 [snd_pcm]
+ snd_hdac_bus_alloc_stream_pages+0x72/0x120 [snd_hda_core]
+ azx_probe_continue+0x39e/0xa90 [snd_hda_intel]
+ process_one_work+0x1d3/0x390
+ worker_thread+0x30/0x390
+ kthread+0x134/0x150
+ ret_from_fork+0x35/0x40
+
+Page allocated via order 0, mask 0x6046c0(GFP_KERNEL|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_COMP), pid 509, tgid 509 (kworker/0:3), ts 18390431517 ns
+PFN 21928 type Unmovable Block 42 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __dma_direct_alloc_pages.constprop.25+0x8a/0x120
+ dma_direct_alloc+0x5a/0x2a0
+ snd_dma_alloc_dir_pages+0x50/0x80 [snd_pcm]
+ snd_hdac_bus_alloc_stream_pages+0x72/0x120 [snd_hda_core]
+ azx_probe_continue+0x39e/0xa90 [snd_hda_intel]
+ process_one_work+0x1d3/0x390
+ worker_thread+0x30/0x390
+ kthread+0x134/0x150
+ ret_from_fork+0x35/0x40
+
+Page allocated via order 0, mask 0x6046c0(GFP_KERNEL|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_COMP), pid 509, tgid 509 (kworker/0:3), ts 18390437517 ns
+PFN 21929 type Unmovable Block 42 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __dma_direct_alloc_pages.constprop.25+0x8a/0x120
+ dma_direct_alloc+0x5a/0x2a0
+ snd_dma_alloc_dir_pages+0x50/0x80 [snd_pcm]
+ snd_hdac_bus_alloc_stream_pages+0x72/0x120 [snd_hda_core]
+ azx_probe_continue+0x39e/0xa90 [snd_hda_intel]
+ process_one_work+0x1d3/0x390
+ worker_thread+0x30/0x390
+ kthread+0x134/0x150
+ ret_from_fork+0x35/0x40
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 3097
+4511405 ns
+PFN 24736 type Unmovable Block 48 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ __kmalloc+0x27f/0x2d0
+ drm_atomic_state_init+0x5c/0xc0 [drm]
+ drm_atomic_state_alloc+0x48/0x70 [drm]
+ drm_atomic_helper_dirtyfb+0x4c/0x270 [drm_kms_helper]
+ drm_mode_dirtyfb_ioctl+0x181/0x1b0 [drm]
+ drm_ioctl_kernel+0xb5/0x140 [drm]
+ drm_ioctl+0x23d/0x440 [drm]
+ do_vfs_ioctl+0xa4/0x690
+ ksys_ioctl+0x64/0xa0
+ __x64_sys_ioctl+0x16/0x20
+ do_syscall_64+0x5b/0x1b0
+
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 2072
+2373550 ns
+PFN 28757 type Unmovable Block 56 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ new_slab+0x3d6/0x4f0
+ ___slab_alloc+0x3a3/0x950
+ kmem_cache_alloc_trace+0x251/0x280
+ drm_atomic_state_alloc+0x35/0x70 [drm]
+ drm_atomic_helper_dirtyfb+0x4c/0x270 [drm_kms_helper]
+ drm_mode_dirtyfb_ioctl+0x181/0x1b0 [drm]
+ drm_ioctl_kernel+0xb5/0x140 [drm]
+ drm_ioctl+0x23d/0x440 [drm]
+ do_vfs_ioctl+0xa4/0x690
+ ksys_ioctl+0x64/0xa0
+ __x64_sys_ioctl+0x16/0x20
+ do_syscall_64+0x5b/0x1b0
+ entry_SYSCALL_64_after_hwframe+0x61/0xc6
+
+Page allocated via order 0, mask 0x6046c0(GFP_KERNEL|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_COMP), pid 509, tgid 509 (kworker/0:3), ts 18390426517 ns
+PFN 21927 type Unmovable Block 42 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __dma_direct_alloc_pages.constprop.25+0x8a/0x120
+ dma_direct_alloc+0x5a/0x2a0
+ snd_dma_alloc_dir_pages+0x50/0x80 [snd_pcm]
+ snd_hdac_bus_alloc_stream_pages+0x72/0x120 [snd_hda_core]
+ azx_probe_continue+0x39e/0xa90 [snd_hda_intel]
+ process_one_work+0x1d3/0x390
+ worker_thread+0x30/0x390
+ kthread+0x134/0x150
+ ret_from_fork+0x35/0x40
+
+Page allocated via order 0, mask 0x6046c0(GFP_KERNEL|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_COMP), pid 509, tgid 509 (kworker/0:3), ts 18390431517 ns
+PFN 21928 type Unmovable Block 42 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __dma_direct_alloc_pages.constprop.25+0x8a/0x120
+ dma_direct_alloc+0x5a/0x2a0
+ snd_dma_alloc_dir_pages+0x50/0x80 [snd_pcm]
+ snd_hdac_bus_alloc_stream_pages+0x72/0x120 [snd_hda_core]
+ azx_probe_continue+0x39e/0xa90 [snd_hda_intel]
+ process_one_work+0x1d3/0x390
+ worker_thread+0x30/0x390
+ kthread+0x134/0x150
+ ret_from_fork+0x35/0x40
+
+Page allocated via order 0, mask 0x6046c0(GFP_KERNEL|__GFP_NOWARN|__GFP_RETRY_MAYFAIL|__GFP_COMP), pid 509, tgid 509 (kworker/0:3), ts 18390437517 ns
+PFN 21929 type Unmovable Block 42 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
+ prep_new_page+0xe5/0x100
+ get_page_from_freelist+0x11b1/0x13b0
+ __alloc_pages_nodemask+0x166/0x330
+ __dma_direct_alloc_pages.constprop.25+0x8a/0x120
+ dma_direct_alloc+0x5a/0x2a0
+ snd_dma_alloc_dir_pages+0x50/0x80 [snd_pcm]
+ snd_hdac_bus_alloc_stream_pages+0x72/0x120 [snd_hda_core]
+ azx_probe_continue+0x39e/0xa90 [snd_hda_intel]
+ process_one_work+0x1d3/0x390
+ worker_thread+0x30/0x390
+ kthread+0x134/0x150
+ ret_from_fork+0x35/0x40
