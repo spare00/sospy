@@ -3,7 +3,7 @@
 import argparse
 from collections import defaultdict
 import re
-
+import logging
 
 def parse_page_owner_file(filename):
     """Parses the page_owner file and extracts relevant data."""
@@ -47,7 +47,7 @@ def parse_page_owner_file(filename):
                 line
             )
             if not match:
-                print(f"Warning: Failed to match allocation line: {line}")
+                logging.warning(f"Failed to match allocation line: {line}")
                 continue
 
             # Update allocation information with matched data
@@ -59,6 +59,8 @@ def parse_page_owner_file(filename):
                 'process': match.group(5) if match.group(5) else None,
                 'timestamp': int(match.group(6)) if match.group(6) else None,
             })
+            logging.debug(f"Parsed allocation: {current_allocation}")
+
             trace_active = True
             modules_in_trace.clear()  # Reset modules for the new trace
 
@@ -94,6 +96,7 @@ def parse_page_owner_file(filename):
                 calltraces[trace_key]['tgid'] = current_allocation.get('tgid')
                 calltraces[trace_key]['process'] = current_allocation.get('process')
                 calltraces[trace_key]['timestamp'] = current_allocation.get('timestamp')
+                logging.debug(f"Updated calltrace: {calltraces[trace_key]}")
 
                 # Update allocations for each unique module in this trace
                 for module in modules_in_trace:
@@ -103,7 +106,44 @@ def parse_page_owner_file(filename):
                 modules_in_trace.clear()
                 trace_active = False
 
+            logging.debug(f"Debug: Allocation parsed - {current_allocation}")
+
     return allocations_by_module, allocations_by_order, calltraces
+
+def show_allocations_by_module_and_order(allocations, verbose=False):
+    print(f"{'Module':<20}{'Order':>10}{'Allocations':>15}{'Memory (GB)':>15}")
+    print("=" * 60)
+
+    total_allocations = 0
+    total_memory_gb = 0
+
+    # Loop through each module and its data
+    for module, data in allocations.items():
+        module_total_allocations = 0
+        module_total_memory_gb = 0
+
+        # Loop through orders within the module
+        for order, count in sorted(data['allocations'].items()):
+            memory_kb = count * (4 * (2 ** order))  # Memory in KB
+            memory_gb = memory_kb / (1024 ** 2)  # Convert to GB
+
+            # Print per-order details
+            print(f"{module:<20}{order:>10}{count:>15}{memory_gb:>15.2f}")
+
+            module_total_allocations += count
+            module_total_memory_gb += memory_gb
+
+        # Print module totals if verbose mode is enabled
+        if verbose:
+            print(f"{module:<20}{'Total':>10}{module_total_allocations:>15}{module_total_memory_gb:>15.2f}")
+            print("-" * 60)
+
+        total_allocations += module_total_allocations
+        total_memory_gb += module_total_memory_gb
+
+    # Print overall totals
+    print("=" * 60)
+    print(f"{'Total':<20}{'':>10}{total_allocations:>15}{total_memory_gb:>15.2f}")
 
 def show_allocations_by_module(allocations):
     print(f"{'Module':<20}{'Allocations':>12}{'Memory (GB)':>15}")
@@ -198,16 +238,34 @@ def main():
         "-c", "--call-traces", nargs="?", type=int, const=3,
         help="Show the top N most commonly seen call traces (default: 3)."
     )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose output for more details."
+    )
+    parser.add_argument(
+        "--debug", action="store_true", help="Enable debug output."
+    )
 
     args = parser.parse_args()
 
+    # Configure logging
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format="%(levelname)s: %(message)s",
+        force=True
+    )
+
+    # Ensure at least one action is specified
     if not any([args.modules, args.orders, args.total, args.call_traces is not None]):
+        logging.warning("No valid actions specified. Use --help for usage information.")
         parser.print_help()
         return
 
     allocations_by_module, allocations_by_order, calltraces = parse_page_owner_file(args.file)
 
-    if args.modules:
+    # Handle combined -m and -o options
+    if args.modules and args.orders:
+        show_allocations_by_module_and_order(allocations_by_module, verbose=args.verbose)
+    elif args.modules:
         show_allocations_by_module(allocations_by_module)
     elif args.orders:
         show_allocations_by_order(allocations_by_order)
