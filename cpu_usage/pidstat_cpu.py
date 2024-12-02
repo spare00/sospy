@@ -3,7 +3,7 @@
 import argparse
 from collections import defaultdict
 
-def calculate_usage_per_user(filename):
+def calculate_usage_per_user(filename, sort_by):
     """Calculate and display CPU usage grouped by user."""
     try:
         with open(filename, 'r') as file:
@@ -42,7 +42,8 @@ def calculate_usage_per_user(filename):
         except ValueError:
             continue
 
-    sorted_users = sorted(user_usage.items(), key=lambda x: x[1]['cpu'], reverse=True)
+    # Sort users by the selected field
+    sorted_users = sorted(user_usage.items(), key=lambda x: x[1][sort_by], reverse=True)
     print(f"{'%usr':<10} {'%system':<10} {'%wait':<10} {'%CPU':<10} {'Count':<8} {'User':<10}")
     print("-" * 60)
     for user, usage in sorted_users:
@@ -50,7 +51,7 @@ def calculate_usage_per_user(filename):
     print("-" * 60)
     print(f"{total_usr:<10.2f} {total_system:<10.2f} {total_wait:<10.2f} {total_cpu:<10.2f} {total_count:<8} {'Total':<10}")
 
-def calculate_usage_per_command(filename):
+def calculate_usage_per_command(filename, sort_by):
     """Calculate and display CPU usage grouped by command."""
     try:
         with open(filename, 'r') as file:
@@ -89,7 +90,8 @@ def calculate_usage_per_command(filename):
         except ValueError:
             continue
 
-    sorted_commands = sorted(command_usage.items(), key=lambda x: x[1]['cpu'], reverse=True)
+    # Sort commands by the selected field
+    sorted_commands = sorted(command_usage.items(), key=lambda x: x[1][sort_by], reverse=True)
     sorted_commands = sorted_commands[:10]  # Limit to top 10 commands
 
     print(f"{'%usr':<10} {'%system':<10} {'%wait':<10} {'%CPU':<10} {'Count':<8} {'Command':<20}")
@@ -163,12 +165,18 @@ def main():
         action="store_true",
         help="Show CPU usage per command, grouped and summed by %%usr, %%system, %%wait, and %%CPU, sorted by total %%CPU. Displays only the top 10 commands."
     )
+    parser.add_argument(
+        "--sort",
+        choices=["usr", "system", "wait", "cpu", "count"],
+        default="cpu",
+        help="Field to sort by. Defaults to 'cpu'."
+    )
     args = parser.parse_args()
 
     if args.user:
-        calculate_usage_per_user(args.filename)
+        calculate_usage_per_user(args.filename, args.sort)
     elif args.command:
-        calculate_usage_per_command(args.filename)
+        calculate_usage_per_command(args.filename, args.sort)
     else:
         calculate_cpu_utilization(args.filename)
 
