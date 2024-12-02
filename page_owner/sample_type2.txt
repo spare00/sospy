@@ -1,4 +1,4 @@
-iPage allocated via order 6, mask 0x6000c1(GFP_KERNEL|GFP_DMA), pid 1, tgid 1 (swapper/0), ts 377764025 ns
+Page allocated via order 6, mask 0x6000c1(GFP_KERNEL|GFP_DMA), pid 1, tgid 1 (swapper/0), ts 377764025 ns
 PFN 256 type Unmovable Block 0 type Unmovable Flags 0x7ffffc0000000(node=0|zone=0|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x10c5/0x13b0
@@ -155,8 +155,7 @@ PFN 4096 type Movable Block 8 type Movable Flags 0xfffffc000002c(referenced|upto
  sel_write_load+0xd4/0xa50
 Charged to memcg init.scope
 
-Page allocated via order 0, mask 0x6082c2(GFP_KERNEL|__GFP_HIGHMEM|__GFP_NOWARN|__GFP_ZERO), pid 763, tgid 763 (NetworkM
-anager), ts 31416233331 ns
+Page allocated via order 0, mask 0x6082c2(GFP_KERNEL|__GFP_HIGHMEM|__GFP_NOWARN|__GFP_ZERO), pid 763, tgid 763 (NetworkManager), ts 31416233331 ns
 PFN 23063 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000000(node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -203,8 +202,7 @@ PFN 23065 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000000(node=0|zo
  page_fault+0x1e/0x30
 Charged (via objcg) to memcg rtkit-daemon.service
 
-Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 872, tgid 872 (modprobe), ts 32955
-646752 ns
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 872, tgid 872 (modprobe), ts 32955646752 ns
 PFN 23743 type Unmovable Block 46 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -261,8 +259,7 @@ PFN 23745 type Unmovable Block 46 type Unmovable Flags 0xfffffc0000000(node=0|zo
  link_path_walk+0x2c1/0x550
  path_openat+0xaa/0x1580
 
-Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 509, tgid 509 (kworker/0:3), ts 18
-607208595 ns
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 509, tgid 509 (kworker/0:3), ts 18607208595 ns
 PFN 27305 type Unmovable Block 53 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -296,8 +293,7 @@ PFN 27306 type Unmovable Block 53 type Unmovable Flags 0xfffffc001002c(reference
  entry_SYSCALL_64_after_hwframe+0x61/0xc6
 Charged to memcg systemd-udevd.service
 
-Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 1595
-3446602 ns
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 15953446602 ns
 PFN 27455 type Unmovable Block 53 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -331,8 +327,7 @@ PFN 27456 type Unmovable Block 53 type Unmovable Flags 0xfffffc001002c(reference
  entry_SYSCALL_64_after_hwframe+0x61/0xc6
 Charged to memcg systemd-udevd.service
 
-Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 617, tgid 617 (modprobe), ts 18594
-557684 ns
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 617, tgid 617 (modprobe), ts 18594557684 ns
 PFN 32783 type Unmovable Block 64 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -378,8 +373,7 @@ PFN 32785 type Unmovable Block 64 type Unmovable Flags 0xfffffc0000000(node=0|zo
  do_syscall_64+0x5b/0x1b0
  entry_SYSCALL_64_after_hwframe+0x61/0xc6
 
-Page allocated via order 0, mask 0x601250(GFP_NOFS|__GFP_NOWARN|__GFP_NORETRY|__GFP_RECLAIMABLE), pid 13580, tgid 13580
-(updatedb), ts 70155606745782 ns
+Page allocated via order 0, mask 0x601250(GFP_NOFS|__GFP_NOWARN|__GFP_NORETRY|__GFP_RECLAIMABLE), pid 13580, tgid 13580(updatedb), ts 70155606745782 ns
 PFN 40444 type Reclaimable Block 78 type Reclaimable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -419,8 +413,7 @@ PFN 40445 type Reclaimable Block 78 type Reclaimable Flags 0xfffffc0000100(slab|
  __do_sys_newlstat+0x39/0x70
 Slab cache page
 
-Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 3178
-8554120 ns
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 31788554120 ns
 PFN 23348 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -455,8 +448,7 @@ PFN 23349 type Unmovable Block 45 type Unmovable Flags 0xfffffc0000100(slab|node
  entry_SYSCALL_64_after_hwframe+0x61/0xc6
 Slab cache page
 
-Page allocated via order 0, mask 0x411200(GFP_NOWAIT|__GFP_NOWARN|__GFP_NORETRY|__GFP_NOMEMALLOC), pid 449, tgid 449 (xf
-saild/dm-0), ts 77950447252244 ns
+Page allocated via order 0, mask 0x411200(GFP_NOWAIT|__GFP_NOWARN|__GFP_NORETRY|__GFP_NOMEMALLOC), pid 449, tgid 449 (xfsaild/dm-0), ts 77950447252244 ns
 PFN 30848 type Unmovable Block 60 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -511,8 +503,7 @@ PFN 30850 type Unmovable Block 60 type Unmovable Flags 0xfffffc0000000(node=0|zo
  do_sys_open+0x4b/0x80
  do_syscall_64+0x5b/0x1b0
 
-Page allocated via order 3, mask 0x495220(GFP_ATOMIC|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 0, tgi
-d 0 (swapper/1), ts 81014678744501 ns
+Page allocated via order 3, mask 0x495220(GFP_ATOMIC|__GFP_NOWARN|__GFP_NORETRY|__GFP_COMP|__GFP_NOMEMALLOC), pid 0, tgid 0 (swapper/1), ts 81014678744501 ns
 PFN 30952 type Unmovable Block 60 type Unmovable Flags 0xfffffc0008000(head|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x10c5/0x13b0
@@ -609,8 +600,7 @@ PFN 21929 type Unmovable Block 42 type Unmovable Flags 0xfffffc0000000(node=0|zo
  kthread+0x134/0x150
  ret_from_fork+0x35/0x40
 
-Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 3097
-4511405 ns
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 30974511405 ns
 PFN 24736 type Unmovable Block 48 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
@@ -629,8 +619,7 @@ PFN 24736 type Unmovable Block 48 type Unmovable Flags 0xfffffc0000100(slab|node
  __x64_sys_ioctl+0x16/0x20
  do_syscall_64+0x5b/0x1b0
 
-Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 2072
-2373550 ns
+Page allocated via order 0, mask 0x6012c0(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY), pid 306, tgid 306 (plymouthd), ts 20722373550 ns
 PFN 28757 type Unmovable Block 56 type Unmovable Flags 0xfffffc0000100(slab|node=0|zone=1|lastcpupid=0x1fffff)
  prep_new_page+0xe5/0x100
  get_page_from_freelist+0x11b1/0x13b0
