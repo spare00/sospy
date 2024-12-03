@@ -48,10 +48,10 @@ def parse_iomem(file_path, reserved_only):
                         start_parent = int(match_parent.group(1), 16)
                         end_parent = int(match_parent.group(2), 16)
                         size_parent = (end_parent - start_parent + 1)
-                        print(f"{parent.rstrip()}\t {size_parent} ({size_parent / (2**20):.2f} MB)")
+                        print(f"{parent.rstrip()}\t {size_parent} ({size_parent / (2**20):.2f} MiB)")
 
             # Print the current Reserved line
-            print(f"{line.rstrip()}\t {size} ({size / (2**20):.2f} MB)")
+            print(f"{line.rstrip()}\t {size} ({size / (2**20):.2f} MiB)")
 
             # Check if text line is a child (if it exists and is indented)
             if i + 1 < len(lines):
@@ -65,7 +65,7 @@ def parse_iomem(file_path, reserved_only):
                         size_child = (end_child - start_child + 1)
                         if "reserved" in next_line.lower():
                             total_reserved_size += size_child  # Add child reserved size to total
-                        print(f"{next_line.rstrip()}\t {size_child} ({size_child / (2**20):.2f} MB)")
+                        print(f"{next_line.rstrip()}\t {size_child} ({size_child / (2**20):.2f} MiB)")
 
         # Exclude lines that don't contain 'Reserved' (case-insensitive) and do not cause an indentation change
         elif "reserved" not in line.lower():
@@ -77,7 +77,7 @@ def parse_iomem(file_path, reserved_only):
                 continue  # Skip this line if it's not changing indentation and doesn't contain 'Reserved'
 
     # Print the total reserved memory size at the end
-    print(f"\nTotal reserved memory: {total_reserved_size} bytes ({total_reserved_size / (2**30):.2f} GB)")
+    print(f"\nTotal reserved memory: {total_reserved_size} bytes ({total_reserved_size / (2**30):.2f} GiB)")
 
 # Function to handle other options
 def parse_full_iomem(file_path, top_level_only, search_keyword=None):
@@ -112,10 +112,10 @@ def parse_full_iomem(file_path, top_level_only, search_keyword=None):
             total_size += size  # Add to total size
 
             # Print the current line with calculated size
-            print(f"{line.rstrip()}\t {size} ({size / (2**20):.2f} MB)")
+            print(f"{line.rstrip()}\t {size} ({size / (2**20):.2f} MiB)")
 
     # Print the total memory size at the end
-    print(f"\nTotal memory: {total_size} bytes ({total_size / (2**30):.2f} GB)")
+    print(f"\nTotal memory: {total_size} bytes ({total_size / (2**30):.2f} GiB)")
 
 # Main function to handle command-line arguments
 def main():
