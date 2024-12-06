@@ -68,7 +68,7 @@ def extract_rss_and_swap_usage(oom_events, include_swap):
 
 def display_usage(event_usage, include_swap):
     """
-    Displays the RSS and optionally swap usage information.
+    Displays the RSS and optionally swap usage information in GB only.
     Args:
         event_usage (defaultdict): RSS and swap usage data.
         include_swap (bool): Whether to display swap usage.
@@ -82,22 +82,22 @@ def display_usage(event_usage, include_swap):
             total_swap_gb = total_swap_kb / 1024 / 1024  # Convert kB to GB
         print(f"\nEvent: {event}")
         if include_swap:
-            print(f"{'RSS (kB)':>15} {'RSS (GB)':>10} {'Swap (kB)':>12} {'Swap (GB)':>12} {'Count':>10} {'Name':<20}")
+            print(f"{'RSS (GB)':>10} {'Swap (GB)':>12} {'Count':>10} {'Name':<20}")
         else:
-            print(f"{'RSS (kB)':>15} {'RSS (GB)':>10} {'Count':>10} {'Name':<20}")
+            print(f"{'RSS (GB)':>10} {'Count':>10} {'Name':<20}")
         for name, data in sorted_usage[:10]:  # Show only the top 10 items
             rss_gb = data['rss_kb'] / 1024 / 1024  # Convert kB to GB
             count = data['count']
             if include_swap:
                 swap_gb = data['swap_kb'] / 1024 / 1024  # Convert kB to GB
-                print(f"{data['rss_kb']:>15} {rss_gb:>10.2f} {data['swap_kb']:>12} {swap_gb:>12.2f} {count:>10} {name:<20}")
+                print(f"{rss_gb:>10.2f} {swap_gb:>12.2f} {count:>10} {name:<20}")
             else:
-                print(f"{data['rss_kb']:>15} {rss_gb:>10.2f} {count:>10} {name:<20}")
-        print('-' * 75)
+                print(f"{rss_gb:>10.2f} {count:>10} {name:<20}")
+        print('-' * 50)
         if include_swap:
-            print(f"{total_rss_kb:>15} {total_rss_gb:>10.2f} {total_swap_kb:>12} {total_swap_gb:>12.2f} {'Total':>10}")
+            print(f"{total_rss_gb:>10.2f} {total_swap_gb:>12.2f} {'Total':>10}")
         else:
-            print(f"{total_rss_kb:>15} {total_rss_gb:>10.2f} {'Total':>10}")
+            print(f"{total_rss_gb:>10.2f} {'Total':>10}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse OOM log and display RSS and optional swap usage.")
