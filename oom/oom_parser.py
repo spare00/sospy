@@ -95,9 +95,9 @@ def display_usage(event_usage, include_swap):
                 print(f"{rss_gb:>10.2f} {count:>10} {name:<20}")
         print('-' * 50)
         if include_swap:
-            print(f"{total_rss_gb:>10.2f} {total_swap_gb:>12.2f} {'Total':>10}")
+            print(f"{total_rss_gb:>10.2f} {total_swap_gb:>12.2f} {'RSS Total':>15}")
         else:
-            print(f"{total_rss_gb:>10.2f} {'Total':>10}")
+            print(f"{total_rss_gb:>10.2f} {'RSS Total':>15}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Parse OOM log and display RSS and optional swap usage.")
