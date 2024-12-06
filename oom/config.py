@@ -23,6 +23,8 @@ patterns = {
     'pagecache': r'(\d+) total pagecache pages',
     'reserved': r'(\d+) pages reserved',
     'total_pages_ram': r'(\d+) pages RAM',
+    'free_swap': r'Free swap\s*=\s*(\d+)kB',
+    'total_swap': r'Total swap\s*=\s*(\d+)kB',
 
     # Add patterns for hugepage-related information
     'hugepages_total': r'hugepages_total=(\d+)',       # Total hugepages

@@ -125,6 +125,22 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
         # Add other memory categories...
     }
 
+    # Add swap usage to the memory summary
+    swap_free_pages = memory_info.get('free_swap', 0) // page_size_kb
+    swap_total_pages = memory_info.get('total_swap', 0) // page_size_kb
+    swap_used_pages = swap_total_pages - swap_free_pages
+
+    swap_free_mb = mb_conversion(swap_free_pages)
+    swap_total_mb = mb_conversion(swap_total_pages)
+    swap_used_mb = mb_conversion(swap_used_pages)
+
+    # Add swap usage to the memory summary
+    memory_summary.update({
+        'Swap Total': (swap_total_mb, swap_total_mb / 1024, swap_total_pages),
+        'Swap Free': (swap_free_mb, swap_free_mb / 1024, swap_free_pages),
+        'Swap Used': (swap_used_mb, swap_used_mb / 1024, swap_used_pages),
+    })
+
     # Include additional fields if show_full is True
     if show_full:
         memory_summary.update({
