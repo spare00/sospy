@@ -5,11 +5,11 @@ import os
 import argparse
 
 # Default path to meminfo
-DEFAULT_MEMINFO = "/proc/meminfo"
+DEFAULT_MEMINFO = "proc/meminfo"
 
 # Create an argument parser
 parser = argparse.ArgumentParser(
-    description="Calculate unaccounted memory from /proc/meminfo or a custom file."
+    description="Calculate unaccounted memory from proc/meminfo or a custom file."
 )
 parser.add_argument(
     "filename",
