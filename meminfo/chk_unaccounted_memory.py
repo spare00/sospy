@@ -50,9 +50,15 @@ meminfo = {}
 with open(filename, 'r') as f:
     for line in f:
         parts = line.split()
+        if len(parts) < 2:  # Skip lines that don't have at least a key and a value
+            continue
         key = parts[0].rstrip(':')
         if key in fields:
-            meminfo[key] = int(parts[1])
+            try:
+                meminfo[key] = int(parts[1])
+            except ValueError:
+                if args.verbose:
+                    print(f"Skipping line due to non-integer value: {line.strip()}")
 
 # Calculate HugePages memory
 if "HugePages_Total" in meminfo and "Hugepagesize" in meminfo:
