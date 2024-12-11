@@ -3,6 +3,44 @@
 import re
 import argparse
 
+# Function to parse and display statistics
+def show_statistics(file_path):
+    system_ram_size = 0
+    reserved_size = 0
+    device_regions_below = 0
+    device_regions_above = 0
+    crash_kernel_size = 0
+    system_ram_ceiling = 0
+
+    with open(file_path, 'r') as file:
+        for line in file:
+            # Match memory range
+            match = re.search(r'([0-9a-fA-F]+)-([0-9a-fA-F]+)', line)
+            if match:
+                start = int(match.group(1), 16)
+                end = int(match.group(2), 16)
+                size = end - start + 1
+
+                if "system ram" in line.lower():
+                    system_ram_size += size
+                    system_ram_ceiling = max(system_ram_ceiling, end)
+                elif "reserved" in line.lower():
+                    reserved_size += size
+                elif "crash kernel" in line.lower():
+                    crash_kernel_size += size
+                else:
+                    if end <= system_ram_ceiling:
+                        device_regions_below += size
+                    else:
+                        device_regions_above += size
+
+    # Display statistics
+    print(f"System RAM: {system_ram_size / (2**20):.2f} MB")
+    print(f"Reserved Memory: {reserved_size / (2**20):.2f} MB")
+    print(f"Device Regions Below System RAM Ceiling: {device_regions_below / (2**20):.2f} MB")
+    print(f"Device Regions Above System RAM Ceiling: {device_regions_above / (2**20):.2f} MB")
+    print(f"Crash Kernel: {crash_kernel_size / (2**20):.2f} MB")
+
 # Function to parse and display memory ranges
 def parse_iomem(file_path, reserved_only):
 
@@ -120,14 +158,19 @@ def parse_full_iomem(file_path, top_level_only, search_keyword=None):
 # Main function to handle command-line arguments
 def main():
     parser = argparse.ArgumentParser(description="Parse /proc/iomem-like file")
+    parser = argparse.ArgumentParser(description="Parse /proc/iomem-like file and display memory region details.")
     parser.add_argument('file', type=str, help='The file to parse (e.g., /proc/iomem)')
-    parser.add_argument('-r', action='store_true', help='Show Reserved lines with their hierarchy')
-    parser.add_argument('-t', action='store_true', help='Show only top-level lines (no indentation)')
-    parser.add_argument('-s', type=str, help='Show only lines matching the provided keyword')
+    parser.add_argument('-r', action='store_true', help='Show lines related to Reserved memory with their hierarchy')
+    parser.add_argument('-t', action='store_true', help='Show only top-level memory regions (no indentation)')
+    parser.add_argument('-s', type=str, help='Show only memory regions matching the provided keyword (case-insensitive)')
+    parser.add_argument('-i', action='store_true', help='Show summary statistics for System RAM, Reserved Memory, and Device Regions')
+
     args = parser.parse_args()
 
     # Call the appropriate function based on the options
-    if args.r:
+    if args.i:
+        show_statistics(args.file)
+    elif args.r:
         parse_iomem(args.file, args.r)
     else:
         parse_full_iomem(args.file, args.t, args.s)
