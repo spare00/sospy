@@ -108,10 +108,12 @@ unaccounted_memory = total_memory - accounted_memory
 
 # Print the formula and values if verbose mode is enabled
 if args.verbose:
-    formula = f"Unaccounted Memory = MemTotal - ({' + '.join(accounted_memory_fields)})"
+    # Create a list of field values for detailed formula
+    detailed_values = [f"{field}={meminfo[field]}" for field in accounted_memory_fields]
+    formula = f"Unaccounted Memory = MemTotal - ({' + '.join(detailed_values)})"
     print("Formula used for calculation:")
     print(f"  {formula}")
-    print(f"  Unaccounted Memory = {total_memory} - ({accounted_memory})\n")
+    print(f"  Unaccounted Memory = {total_memory} - ({' + '.join(str(meminfo[field]) for field in accounted_memory_fields)})\n")
 
 # Print the memory information with proper alignment and enhanced formatting
 header = f"{'Field':<15} {'Size (kB)':>15}   "
