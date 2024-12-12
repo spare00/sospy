@@ -110,7 +110,7 @@ def parse_page_owner_file(filename):
 
     return allocations_by_module, allocations_by_order, calltraces
 
-def show_allocations_by_process(calltraces):
+def show_allocations_by_process(calltraces, top_n=10):
     print(f"{'Process':<20}{'Allocations':>12}{'Memory (GB)':>15}")
     print("=" * 47)
 
@@ -131,7 +131,7 @@ def show_allocations_by_process(calltraces):
     total_memory_gb = total_memory_kb / (1024 ** 2)  # Convert KB to GB
 
     # Sort processes by memory usage and take the top 10
-    sorted_processes = sorted(process_data.items(), key=lambda x: x[1]['memory_kb'], reverse=True)[:10]
+    sorted_processes = sorted(process_data.items(), key=lambda x: x[1]['memory_kb'], reverse=True)[:top_n]
 
     # Print the top 10 processes
     for process, data in sorted_processes:
@@ -265,14 +265,14 @@ def main():
         "-o", "--orders", action="store_true", help="Show number of allocations and memory utilization per order."
     )
     parser.add_argument(
-        "-p", "--processes", action="store_true", help="Show memory usage grouped by process."
+        "-p", "--processes", nargs="?", type=int, const=10, help="Show memory usage grouped by process."
     )
     parser.add_argument(
         "-t", "--total", action="store_true", help="Show total memory utilization and total number of allocations."
     )
     parser.add_argument(
         "-c", "--call-traces", nargs="?", type=int, const=3,
-        help="Show the top N most commonly seen call traces (default: 3)."
+        help="Show the top N most commonly seen call traces."
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output for more details."
@@ -291,16 +291,15 @@ def main():
     )
 
     # Ensure at least one action is specified
-    if not any([args.modules, args.orders, args.processes, args.total, args.call_traces is not None]):
+    if not any([args.modules, args.orders, args.processes is not None, args.total, args.call_traces is not None]):
         logging.warning("No valid actions specified. Use --help for usage information.")
         parser.print_help()
         return
 
     allocations_by_module, allocations_by_order, calltraces = parse_page_owner_file(args.file)
 
-    # Handle combined -m and -o options
-    if args.processes:
-        show_allocations_by_process(calltraces)
+    if args.processes is not None:
+        show_allocations_by_process(calltraces, args.processes)
     elif args.modules and args.orders:
         show_allocations_by_module_and_order(allocations_by_module, verbose=args.verbose)
     elif args.modules:
