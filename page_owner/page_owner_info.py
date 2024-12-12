@@ -10,6 +10,9 @@ def parse_page_owner_file(filename):
     with open(filename, 'r') as f:
         lines = f.readlines()
 
+    # Process data to store allocations and memory usage per process
+    process_data = defaultdict(lambda: {'allocations': 0, 'memory_kb': 0})
+
     allocations_by_module = defaultdict(lambda: {'allocations': defaultdict(int), 'pages': 0})
     allocations_by_order = defaultdict(int)
     calltraces = defaultdict(
@@ -59,7 +62,20 @@ def parse_page_owner_file(filename):
                 'process': match.group(5) if match.group(5) else None,
                 'timestamp': int(match.group(6)) if match.group(6) else None,
             })
-            logging.debug(f"Parsed allocation: {current_allocation}")
+
+            # Calculate memory usage for the current allocation
+            pages = 1 << current_allocation['order']  # Number of pages based on the order
+            memory_kb = pages * 4  # Memory in KB (4 KB per page)
+
+            # Aggregate allocations and memory usage per process
+            process_name = current_allocation.get('process', 'Unknown')
+            process_data[process_name]['allocations'] += 1
+            process_data[process_name]['memory_kb'] += memory_kb
+
+            logging.debug(
+                f"Allocation for process {process_name}: Order {current_allocation['order']}, "
+                f"Pages {pages}, Memory {memory_kb / 1024:.2f} MB"
+            )
 
             trace_active = True
             modules_in_trace.clear()  # Reset modules for the new trace
@@ -96,7 +112,6 @@ def parse_page_owner_file(filename):
                 calltraces[trace_key]['tgid'] = current_allocation.get('tgid')
                 calltraces[trace_key]['process'] = current_allocation.get('process') or 'Unknown'
                 calltraces[trace_key]['timestamp'] = current_allocation.get('timestamp')
-                logging.debug(f"Updated calltrace: {calltraces[trace_key]}")
 
                 # Update allocations for each unique module in this trace
                 for module in modules_in_trace:
@@ -106,40 +121,25 @@ def parse_page_owner_file(filename):
                 modules_in_trace.clear()
                 trace_active = False
 
-            logging.debug(f"Debug: Allocation parsed - {current_allocation}")
+    return process_data, allocations_by_module, allocations_by_order, calltraces
 
-    return allocations_by_module, allocations_by_order, calltraces
-
-def show_allocations_by_process(calltraces, top_n=10):
+def show_allocations_by_process(process_data, top_n=10):
     print(f"{'Process':<20}{'Allocations':>12}{'Memory (GB)':>15}")
     print("=" * 47)
 
-    process_data = defaultdict(lambda: {'allocations': 0, 'memory_kb': 0})
+    # Sort processes by memory usage and take the top N
+    sorted_processes = sorted(process_data.items(), key=lambda x: x[1]['memory_kb'], reverse=True)
 
-    # Aggregate data by process name
-    for trace, data in calltraces.items():
-        process = data.get('process') or 'Unknown'  # Default to 'Unknown' if process is None or missing
-        pages = data.get('pages', 0)
-        memory_kb = pages * 4  # Each page is 4 KB
-
-        process_data[process]['allocations'] += data.get('count', 0)
-        process_data[process]['memory_kb'] += memory_kb
-
-    # Compute totals for all processes
     total_allocations = sum(data['allocations'] for data in process_data.values())
     total_memory_kb = sum(data['memory_kb'] for data in process_data.values())
-    total_memory_gb = total_memory_kb / (1024 ** 2)  # Convert KB to GB
 
-    # Sort processes by memory usage and take the top 10
-    sorted_processes = sorted(process_data.items(), key=lambda x: x[1]['memory_kb'], reverse=True)[:top_n]
-
-    # Print the top 10 processes
-    for process, data in sorted_processes:
-        process = process or 'Unknown'  # Ensure process name is valid
+    # Display only the top N processes
+    for process, data in sorted_processes[:top_n]:
         memory_gb = data['memory_kb'] / (1024 ** 2)  # Convert KB to GB
         print(f"{process:<20}{data['allocations']:>12}{memory_gb:>15.2f}")
 
-    # Print overall totals
+    # Print totals for all processes
+    total_memory_gb = total_memory_kb / (1024 ** 2)
     print("=" * 47)
     print(f"{'Total (All Processes)':<20}{total_allocations:>12}{total_memory_gb:>15.2f}")
 
@@ -296,10 +296,10 @@ def main():
         parser.print_help()
         return
 
-    allocations_by_module, allocations_by_order, calltraces = parse_page_owner_file(args.file)
+    process_data, allocations_by_module, allocations_by_order, calltraces = parse_page_owner_file(args.file)
 
     if args.processes is not None:
-        show_allocations_by_process(calltraces, args.processes)
+        show_allocations_by_process(process_data, args.processes)
     elif args.modules and args.orders:
         show_allocations_by_module_and_order(allocations_by_module, verbose=args.verbose)
     elif args.modules:
