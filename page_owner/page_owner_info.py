@@ -238,11 +238,23 @@ def show_summary(allocations_by_order):
     print(f"Total Allocations: {total_allocations}")
     print(f"Total Memory (GB): {total_memory_gb:.2f}")
 
-def show_top_call_traces(calltraces, top_n=3):
+def show_top_call_traces(calltraces, top_n=3, filter_process=None):
+    """Show the top N most commonly seen call traces, optionally filtered by process."""
+    # Filter call traces by process if a filter is specified
+    filtered_traces = {
+        trace: data for trace, data in calltraces.items()
+        if filter_process is None or data.get('process') == filter_process
+    }
 
-    """Show the top N most commonly seen call traces."""
-    sorted_traces = sorted(calltraces.items(), key=lambda x: x[1]['count'], reverse=True)[:top_n]
-    print(f"Top {top_n} most commonly seen call traces:\n")
+    # Sort the filtered call traces by their count (frequency)
+    sorted_traces = sorted(filtered_traces.items(), key=lambda x: x[1]['count'], reverse=True)[:top_n]
+
+    print(f"Top {top_n} most commonly seen call traces{f' for process {filter_process}' if filter_process else ''}:\n")
+
+    if not sorted_traces:
+        print("No call traces found for the specified criteria.")
+        return
+
     for i, (trace, data) in enumerate(sorted_traces, 1):
         pages = data['pages']
         memory_gb = pages * 4 / (1024 ** 2)  # Convert pages to GB
@@ -275,6 +287,10 @@ def main():
         help="Show the top N most commonly seen call traces."
     )
     parser.add_argument(
+        "-f", "--filter-process", type=str,
+        help="Filter call traces by a specific process name."
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output for more details."
     )
     parser.add_argument(
@@ -298,8 +314,11 @@ def main():
 
     process_data, allocations_by_module, allocations_by_order, calltraces = parse_page_owner_file(args.file)
 
+    # Execute actions based on options
     if args.processes is not None:
         show_allocations_by_process(process_data, args.processes)
+    elif args.call_traces is not None:
+        show_top_call_traces(calltraces, args.call_traces, filter_process=args.filter_process)
     elif args.modules and args.orders:
         show_allocations_by_module_and_order(allocations_by_module, verbose=args.verbose)
     elif args.modules:
@@ -308,8 +327,6 @@ def main():
         show_allocations_by_order(allocations_by_order)
     elif args.total:
         show_summary(allocations_by_order)
-    elif args.call_traces is not None:
-        show_top_call_traces(calltraces, args.call_traces)
 
 if __name__ == "__main__":
     main()
