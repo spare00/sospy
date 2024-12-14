@@ -397,11 +397,7 @@ def main():
     )
     parser.add_argument(
         "-s", "--slabs", action="store_true",
-        help="Show slab usage per order"
-    )
-    parser.add_argument(
-        "-a", "--slabs-application", action="store_true",
-        help="Show slab usage per process name, sorted by usage (top 10)"
+        help="Show slab usage. (Only works with -p or -o)"
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output for more details."
@@ -420,7 +416,7 @@ def main():
     )
 
     # Ensure at least one action is specified
-    if not any([args.modules, args.orders, args.processes is not None, args.total, args.call_traces is not None, args.slabs, args.slabs_application]):
+    if not any([args.modules, args.orders, args.processes is not None, args.total, args.call_traces is not None]):
         logging.warning("No valid actions specified. Use --help for usage information.")
         parser.print_help()
         return
@@ -428,7 +424,13 @@ def main():
     process_data, allocations_by_module, allocations_by_order, calltraces, slab_usage, non_slab_usage, app_slab_usage, app_non_slab_usage = parse_page_owner_file(args.file)
 
     # Execute actions based on options
-    if args.processes is not None:
+    if args.processes is not None and args.slabs:
+        logging.info("Displaying slab usage grouped by process name.")
+        show_slab_usage_by_application(app_slab_usage, app_non_slab_usage)
+    elif args.orders and args.slabs:
+        logging.info("Displaying slab usage grouped by order.")
+        show_slab_usage_by_order(slab_usage, non_slab_usage)
+    elif args.processes is not None:
         show_allocations_by_process(process_data, args.processes)
     elif args.call_traces is not None:
         show_top_call_traces(calltraces, args.call_traces, filter_process=args.filter_process)
@@ -440,10 +442,6 @@ def main():
         show_allocations_by_order(allocations_by_order)
     elif args.total:
         show_summary(allocations_by_order)
-    elif args.slabs:
-        show_slab_usage_by_order(slab_usage, non_slab_usage)
-    elif args.slabs_application:
-        show_slab_usage_by_application(app_slab_usage, app_non_slab_usage)
 
 if __name__ == "__main__":
     main()
