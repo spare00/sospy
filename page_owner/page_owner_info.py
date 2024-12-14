@@ -5,6 +5,18 @@ from collections import defaultdict
 import re
 import logging
 
+# Expanded list of functions related to slab allocation
+SLAB_FUNCTIONS = [
+    "kmem_cache_alloc",
+    "kmem_cache_alloc_node",
+    "allocate_slab",
+    "___slab_alloc",
+    "kmem_cache_alloc_lru",
+    "slab_alloc",
+    "__slab_alloc",
+    "__kmalloc"
+]
+
 def parse_page_owner_file(filename):
     """Parses the page_owner file and extracts relevant data."""
     with open(filename, 'r') as f:
@@ -31,6 +43,14 @@ def parse_page_owner_file(filename):
     current_calltrace = []
     modules_in_trace = set()
     trace_active = False
+
+    """Parses page_owner data and calculates slab usage."""
+    slab_usage = defaultdict(int)  # {order: total_pages}
+    non_slab_usage = defaultdict(int)  # {order: total_pages}
+    app_slab_usage = defaultdict(int)  # {app_name: total_pages}
+    app_non_slab_usage = defaultdict(int)
+
+    is_slab_allocation = False
 
     for line in lines:
         line = line.strip()
@@ -72,12 +92,13 @@ def parse_page_owner_file(filename):
             process_data[process_name]['allocations'] += 1
             process_data[process_name]['memory_kb'] += memory_kb
 
-            logging.debug(
-                f"Allocation for process {process_name}: Order {current_allocation['order']}, "
-                f"Pages {pages}, Memory {memory_kb / 1024:.2f} MB"
-            )
+            #logging.debug(
+                #f"Allocation for process {process_name}: Order {current_allocation['order']}, "
+                #f"Pages {pages}, Memory {memory_kb / 1024:.2f} MB"
+            #)
 
             trace_active = True
+            is_slab_allocation = False
             modules_in_trace.clear()  # Reset modules for the new trace
 
         elif line.startswith("PFN"):
@@ -99,6 +120,9 @@ def parse_page_owner_file(filename):
 
             if line:
                 current_calltrace.append(line)
+                if is_slab_allocation is False and any(func in line for func in SLAB_FUNCTIONS):
+                    is_slab_allocation = True
+
             else:
                 # End of the call trace
                 trace_key = "\n".join(current_calltrace)
@@ -117,11 +141,30 @@ def parse_page_owner_file(filename):
                 for module in modules_in_trace:
                     allocations_by_module[module]['allocations'][current_allocation['order']] += 1
 
+                order = current_allocation['order']
+                process_name = current_allocation['process']
+
+                # If it's a slab allocation, add usage
+                if is_slab_allocation:
+
+                    # Increment slab usage by order
+                    slab_usage[order] += 1 << order
+                    logging.debug(f"process name: {process_name}")
+
+                    # Increment application usage
+                    if process_name:
+                        app_slab_usage[process_name] += 1 << order
+                        logging.debug(f"Added to application '{process_name}': {1 << order} pages")
+                else:
+                    non_slab_usage[order] += 1 << order
+                    if process_name:
+                        app_non_slab_usage[process_name] += 1 << order
+
                 current_calltrace = []
                 modules_in_trace.clear()
                 trace_active = False
-
-    return process_data, allocations_by_module, allocations_by_order, calltraces
+ 
+    return process_data, allocations_by_module, allocations_by_order, calltraces, slab_usage, non_slab_usage, app_slab_usage, app_non_slab_usage
 
 def show_allocations_by_process(process_data, top_n=10):
     print(f"{'Process':<20}{'Allocations':>12}{'Memory (GB)':>15}")
@@ -264,6 +307,68 @@ def show_top_call_traces(calltraces, top_n=3, filter_process=None):
         print(trace)
         print()
 
+def calculate_total_slab_pages(usage):
+    """Calculate total pages used for slabs from a usage dictionary."""
+    return sum(pages for pages in usage.values())
+
+def format_usage_in_gb(pages):
+    """Convert pages to GB and format the output."""
+    gb = pages * 4 / 1024 / 1024  # 1 page = 4 KB; Convert to GB
+    return f"{gb:.2f} GB"
+
+def show_slab_usage_by_order(slab_usage, non_slab_usage):
+    """Print slab and non-slab usage grouped by order."""
+    print(f"{'Order':<10}{'Slabs (GB)':<20}{'Non Slabs (GB)':<20}{'Total (GB)':<20}")
+    print("-" * 70)
+
+    # Sort orders and print usage
+    orders = sorted(set(slab_usage.keys()).union(non_slab_usage.keys()))
+    for order in orders:
+        slab_pages = slab_usage.get(order, 0)
+        non_slab_pages = non_slab_usage.get(order, 0)
+        total_pages = slab_pages + non_slab_pages
+
+        slab_gb = format_usage_in_gb(slab_pages)
+        non_slab_gb = format_usage_in_gb(non_slab_pages)
+        total_gb = format_usage_in_gb(total_pages)
+        print(f"{order:<10}{slab_gb:<20}{non_slab_gb:<20}{total_gb:<20}")
+
+    total_slab_pages = calculate_total_slab_pages(slab_usage)
+    total_non_slab_pages = calculate_total_slab_pages(non_slab_usage)
+    total_pages = total_slab_pages + total_non_slab_pages
+    print("-" * 70)
+    print(f"{'Total':<10}{format_usage_in_gb(total_slab_pages):<20}{format_usage_in_gb(total_non_slab_pages):<20}{format_usage_in_gb(total_pages):<20}")
+
+def show_slab_usage_by_application(app_slab_usage, app_non_slab_usage, top_n=10):
+    """Print slab and non-slab usage grouped by application."""
+    combined_usage = {
+        app_name: (slab_pages, app_non_slab_usage.get(app_name, 0))
+        for app_name, slab_pages in app_slab_usage.items()
+    }
+
+    # Include applications with non-slab usage only
+    for app_name, non_slab_pages in app_non_slab_usage.items():
+        if app_name not in combined_usage:
+            combined_usage[app_name] = (0, non_slab_pages)
+
+    print(f"{'Application':<20}{'Slabs (GB)':<20}{'Non Slabs (GB)':<20}{'Total (GB)':<20}")
+    print("-" * 80)
+
+    sorted_usage = sorted(combined_usage.items(), key=lambda x: x[1][0] + x[1][1], reverse=True)[:top_n]
+
+    for app_name, (slab_pages, non_slab_pages) in sorted_usage:
+        slab_gb = format_usage_in_gb(slab_pages)
+        non_slab_gb = format_usage_in_gb(non_slab_pages)
+        total_gb = format_usage_in_gb(slab_pages + non_slab_pages)
+        print(f"{app_name:<20}{slab_gb:<20}{non_slab_gb:<20}{total_gb:<20}")
+
+    total_slab_pages = calculate_total_slab_pages(app_slab_usage)
+    total_non_slab_pages = calculate_total_slab_pages(app_non_slab_usage)
+    total_pages = total_slab_pages + total_non_slab_pages
+
+    print("-" * 80)
+    print(f"{'Total':<20}{format_usage_in_gb(total_slab_pages):<20}{format_usage_in_gb(total_non_slab_pages):<20}{format_usage_in_gb(total_pages):<20}")
+
 def main():
     parser = argparse.ArgumentParser(
         description="Analyze page_owner output.",
@@ -277,7 +382,7 @@ def main():
         "-o", "--orders", action="store_true", help="Show number of allocations and memory utilization per order."
     )
     parser.add_argument(
-        "-p", "--processes", nargs="?", type=int, const=10, help="Show memory usage grouped by process."
+        "-p", "--processes", nargs="?", type=int, const=10, help="Show memory usage grouped by process name."
     )
     parser.add_argument(
         "-t", "--total", action="store_true", help="Show total memory utilization and total number of allocations."
@@ -288,7 +393,15 @@ def main():
     )
     parser.add_argument(
         "-f", "--filter-process", type=str,
-        help="Filter call traces by a specific process name."
+        help="Filter call traces by a specific process name.(Only works with -c"
+    )
+    parser.add_argument(
+        "-s", "--slabs", action="store_true",
+        help="Show slab usage per order"
+    )
+    parser.add_argument(
+        "-a", "--slabs-application", action="store_true",
+        help="Show slab usage per process name, sorted by usage (top 10)"
     )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output for more details."
@@ -307,12 +420,12 @@ def main():
     )
 
     # Ensure at least one action is specified
-    if not any([args.modules, args.orders, args.processes is not None, args.total, args.call_traces is not None]):
+    if not any([args.modules, args.orders, args.processes is not None, args.total, args.call_traces is not None, args.slabs, args.slabs_application]):
         logging.warning("No valid actions specified. Use --help for usage information.")
         parser.print_help()
         return
 
-    process_data, allocations_by_module, allocations_by_order, calltraces = parse_page_owner_file(args.file)
+    process_data, allocations_by_module, allocations_by_order, calltraces, slab_usage, non_slab_usage, app_slab_usage, app_non_slab_usage = parse_page_owner_file(args.file)
 
     # Execute actions based on options
     if args.processes is not None:
@@ -327,6 +440,10 @@ def main():
         show_allocations_by_order(allocations_by_order)
     elif args.total:
         show_summary(allocations_by_order)
+    elif args.slabs:
+        show_slab_usage_by_order(slab_usage, non_slab_usage)
+    elif args.slabs_application:
+        show_slab_usage_by_application(app_slab_usage, app_non_slab_usage)
 
 if __name__ == "__main__":
     main()
