@@ -177,7 +177,7 @@ def convert_memory(memory_kb, unit):
     else:
         raise ValueError(f"Invalid unit: {unit}. Use 'K', 'M', or 'G'.")
 
-def show_allocations_by_process(process_data, top_n=10, unit='G'):
+def show_allocations_by_process(process_data, top_n=10, unit='G', verbose=False):
     print(f"{'Process':<20}{'Allocations':>12}{f'Memory ({unit})':>15}")
     print("=" * 47)
 
@@ -197,42 +197,47 @@ def show_allocations_by_process(process_data, top_n=10, unit='G'):
     print("=" * 47)
     print(f"{'Total (All Processes)':<20}{total_allocations:>12}{total_memory:>15.2f} {unit_label}")
 
-def show_allocations_by_module_and_order(allocations, verbose=False):
-    print(f"{'Module':<20}{'Order':>10}{'Allocations':>15}{'Memory (GB)':>15}")
+    if verbose:
+        print(f"\nProcessed {len(process_data)} processes. Displayed top {top_n}.")
+
+def show_allocations_by_module_and_order(allocations, unit='G', verbose=False):
+    print(f"{'Module':<20}{'Order':>10}{'Allocations':>15}{f'Memory ({unit})':>15}")
     print("=" * 60)
 
     total_allocations = 0
-    total_memory_gb = 0
+    total_memory_kb = 0
 
     # Loop through each module and its data
     for module, data in allocations.items():
         module_total_allocations = 0
-        module_total_memory_gb = 0
+        module_total_memory_kb = 0
 
         # Loop through orders within the module
         for order, count in sorted(data['allocations'].items()):
             memory_kb = count * (4 * (2 ** order))  # Memory in KB
-            memory_gb = memory_kb / (1024 ** 2)  # Convert to GB
+            memory, unit_label = convert_memory(memory_kb, unit)
 
             # Print per-order details
-            print(f"{module:<20}{order:>10}{count:>15}{memory_gb:>15.2f}")
+            print(f"{module:<20}{order:>10}{count:>15}{memory:>15.2f} {unit_label}")
 
             module_total_allocations += count
-            module_total_memory_gb += memory_gb
+            module_total_memory_kb += memory_kb
 
         # Print module totals if verbose mode is enabled
         if verbose:
-            print(f"{module:<20}{'Total':>10}{module_total_allocations:>15}{module_total_memory_gb:>15.2f}")
+            module_memory, unit_label = convert_memory(module_total_memory_kb, unit)
+            print(f"{module:<20}{'Total':>10}{module_total_allocations:>15}{module_memory:>15.2f} {unit_label}")
             print("-" * 60)
 
         total_allocations += module_total_allocations
-        total_memory_gb += module_total_memory_gb
+        total_memory_kb += module_total_memory_kb
 
     # Print overall totals
+    total_memory, unit_label = convert_memory(total_memory_kb, unit)
     print("=" * 60)
-    print(f"{'Total':<20}{'':>10}{total_allocations:>15}{total_memory_gb:>15.2f}")
+    print(f"{'Total':<20}{'':>10}{total_allocations:>15}{total_memory:>15.2f} {unit_label}")
 
-def show_allocations_by_module(allocations, unit='G'):
+def show_allocations_by_module(allocations, unit='G', verbose=False):
     print(f"{'Module':<20}{'Allocations':>12}{f'Memory ({unit})':>15}")
     print("=" * 47)
 
@@ -263,7 +268,7 @@ def show_allocations_by_module(allocations, unit='G'):
     print("=" * 47)
     print(f"{'Total':<20}{total_allocations:>12}{total_memory:>15.2f} {unit_label}")
 
-def show_allocations_by_order(allocations, unit='G'):
+def show_allocations_by_order(allocations, unit='G', verbose=False):
     total_allocations = 0
     total_memory_kb = 0
 
@@ -281,7 +286,7 @@ def show_allocations_by_order(allocations, unit='G'):
     print("=" * 40)
     print(f"{'Total':<10}{total_allocations:>15}{total_memory:>15.2f} {unit_label}")
 
-def show_summary(allocations_by_order, unit='G'):
+def show_summary(allocations_by_order, unit='G', verbose=False):
     """Display a summary of total memory utilization and allocations."""
     total_allocations = sum(allocations_by_order.values())
     total_memory_kb = sum(
@@ -295,7 +300,7 @@ def show_summary(allocations_by_order, unit='G'):
     print(f"Total Allocations: {total_allocations}")
     print(f"Total Memory ({unit_label}): {total_memory:.2f}")
 
-def show_top_call_traces(calltraces, top_n=3, filter_process=None):
+def show_top_call_traces(calltraces, top_n=3, filter_process=None, verbose=False):
     """Show the top N most commonly seen call traces, optionally filtered by process."""
     # Filter call traces by process if a filter is specified
     filtered_traces = {
@@ -330,7 +335,7 @@ def format_usage_in_gb(pages):
     gb = pages * 4 / 1024 / 1024  # 1 page = 4 KB; Convert to GB
     return f"{gb:.2f} GB"
 
-def show_slab_usage_by_order(slab_usage, non_slab_usage, unit='G'):
+def show_slab_usage_by_order(slab_usage, non_slab_usage, unit='G', verbose=False):
     """Print slab and non-slab usage grouped by order."""
     print(f"{'Order':<10}{f'Slabs ({unit})':<20}{f'Non Slabs ({unit})':<20}{f'Total ({unit})':<20}")
     print("-" * 70)
@@ -348,6 +353,7 @@ def show_slab_usage_by_order(slab_usage, non_slab_usage, unit='G'):
 
         print(f"{order:<10}{slab_memory:<20.2f}{non_slab_memory:<20.2f}{total_memory:<20.2f}")
 
+    # Summarize totals
     total_slab_pages = calculate_total_slab_pages(slab_usage)
     total_non_slab_pages = calculate_total_slab_pages(non_slab_usage)
     total_pages = total_slab_pages + total_non_slab_pages
@@ -359,7 +365,10 @@ def show_slab_usage_by_order(slab_usage, non_slab_usage, unit='G'):
     print("-" * 70)
     print(f"{'Total':<10}{total_slab_memory:<20.2f}{total_non_slab_memory:<20.2f}{total_memory:<20.2f}")
 
-def show_slab_usage_by_application(app_slab_usage, app_non_slab_usage, top_n=10, unit='G'):
+    if verbose:
+        print(f"\nVerbose: Total slab pages: {total_slab_pages}, Total non-slab pages: {total_non_slab_pages}.")
+
+def show_slab_usage_by_application(app_slab_usage, app_non_slab_usage, top_n=10, unit='G', verbose=False):
     """Print slab and non-slab usage grouped by application."""
     combined_usage = {
         app_name: (slab_pages, app_non_slab_usage.get(app_name, 0))
@@ -455,21 +464,21 @@ def main():
     # Execute actions based on options
     if args.processes is not None and args.slabs:
         logging.info("Displaying slab usage grouped by process name.")
-        show_slab_usage_by_application(app_slab_usage, app_non_slab_usage, unit=args.unit)
+        show_slab_usage_by_application(app_slab_usage, app_non_slab_usage, unit=args.unit, verbose=args.verbose)
     elif args.orders and args.slabs:
         logging.info("Displaying slab usage grouped by order.")
-        show_slab_usage_by_order(slab_usage, non_slab_usage, unit=args.unit)
+        show_slab_usage_by_order(slab_usage, non_slab_usage, unit=args.unit, verbose=args.verbose)
     elif args.processes is not None:
-        show_allocations_by_process(process_data, args.processes, unit=args.unit)
+        show_allocations_by_process(process_data, args.processes, unit=args.unit, verbose=args.verbose)
 
     elif args.call_traces is not None:
-        show_top_call_traces(calltraces, args.call_traces, filter_process=args.filter_process)
+        show_top_call_traces(calltraces, args.call_traces, filter_process=args.filter_process, verbose=args.verbose)
     elif args.modules and args.orders:
-        show_allocations_by_module_and_order(allocations_by_module, verbose=args.verbose, unit=args.unit)
+        show_allocations_by_module_and_order(allocations_by_module, unit=args.unit, verbose=args.verbose)
     elif args.modules:
-        show_allocations_by_module(allocations_by_module, unit=args.unit)
+        show_allocations_by_module(allocations_by_module, unit=args.unit, verbose=args.verbose)
     elif args.orders:
-        show_allocations_by_order(allocations_by_order, unit=args.unit)
+        show_allocations_by_order(allocations_by_order, unit=args.unit, verbose=args.verbose)
     elif args.total:
         show_summary(allocations_by_order, unit=args.unit)
 
