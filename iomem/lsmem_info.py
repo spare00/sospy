@@ -3,28 +3,65 @@
 import sys
 import argparse
 from pathlib import Path
+import re
+from collections import defaultdict
 
-def parse_file(filename, show_online=False, show_offline=False):
+# Helper function to convert memory size to MB
+def convert_to_mb(size_str):
+    size_units = {"K": 1 / 1024, "M": 1, "G": 1024, "T": 1024**2}
+    match = re.match(r"(\d+)([KMGT])", size_str)
+    if match:
+        size, unit = match.groups()
+        return int(size) * size_units[unit]
+    return 0  # Return 0 if parsing fails
+
+def parse_file(filename, show_online=False, show_offline=False, show_per_node=False):
     try:
         with open(filename, 'r') as file:
             lines = file.readlines()
 
-        # Always include lines containing these keywords
+        # Skip header line
+        lines = lines[1:]
+
+        # Always include these summary lines
         keywords = ['Memory block size:', 'Total online memory', 'Total offline memory']
         filtered_lines = []
         keyword_lines = [line for line in lines if any(keyword in line for keyword in keywords)]
 
+        # Per-node memory tracking
+        node_memory = defaultdict(lambda: {"online": 0, "offline": 0})
+
         for line in lines:
             if any(keyword in line for keyword in keywords):
-                continue  # Skip these lines for now (we'll add them at the end)
-            elif show_online and 'online' in line and 'offline' not in line:
+                continue  # Skip summary lines for now
+            
+            parts = line.split()
+            if len(parts) < 6:
+                continue  # Skip malformed lines
+
+            size_str = parts[1]  # SIZE column
+            state = parts[2].lower()  # STATE column
+            node = parts[5]  # NODE column
+
+            if not node.isdigit():
+                continue  # Skip invalid node entries
+
+            size_mb = convert_to_mb(size_str)
+            node_memory[int(node)][state] += size_mb
+
+            if show_online and state == "online":
                 filtered_lines.append(line)
-            elif show_offline and 'offline' in line:
+            elif show_offline and state == "offline":
                 filtered_lines.append(line)
-            elif not show_online and not show_offline:
+            elif not show_online and not show_offline and not show_per_node:
                 filtered_lines.append(line)  # Show all if no flags are set
 
-        # Append keyword lines to the bottom of the output
+        # Append per-node memory summary
+        if show_per_node:
+            filtered_lines.append("\nPer-Node Memory Summary:")
+            for node, sizes in sorted(node_memory.items()):
+                filtered_lines.append(f"Node {node}: Online: {sizes['online']} MB, Offline: {sizes['offline']} MB")
+
         return filtered_lines + keyword_lines
 
     except FileNotFoundError:
@@ -40,6 +77,8 @@ def main():
     parser.add_argument("filename", nargs="?", default=default_filename, help="Input file containing memory block details (default: sos_commands/memory/lsmem_-a_-o_RANGE_SIZE_STATE_REMOVABLE_ZONES_NODE_BLOCK).")
     parser.add_argument("-o", "--online", action="store_true", help="Show only online memory blocks.")
     parser.add_argument("-f", "--offline", action="store_true", help="Show only offline memory blocks.")
+    parser.add_argument("-n", "--node-summary", action="store_true", help="Show total memory size (online/offline) per node.")
+
     args = parser.parse_args()
 
     # Check for mutually exclusive options
@@ -53,7 +92,7 @@ def main():
         print(f"Error: File '{filename}' not found.", file=sys.stderr)
         sys.exit(1)
 
-    lines = parse_file(filename, show_online=args.online, show_offline=args.offline)
+    lines = parse_file(filename, show_online=args.online, show_offline=args.offline, show_per_node=args.node_summary)
 
     # Print the results
     for line in lines:
