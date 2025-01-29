@@ -6,9 +6,9 @@ from pathlib import Path
 import re
 from collections import defaultdict
 
-# Helper function to convert memory size to MB
-def convert_to_mb(size_str):
-    size_units = {"K": 1 / 1024, "M": 1, "G": 1024, "T": 1024**2}
+# Helper function to convert memory size to GB
+def convert_to_gb(size_str):
+    size_units = {"K": 1 / (1024**2), "M": 1 / 1024, "G": 1, "T": 1024}
     match = re.match(r"(\d+)([KMGT])", size_str)
     if match:
         size, unit = match.groups()
@@ -46,8 +46,8 @@ def parse_file(filename, show_online=False, show_offline=False, show_per_node=Fa
             if not node.isdigit():
                 continue  # Skip invalid node entries
 
-            size_mb = convert_to_mb(size_str)
-            node_memory[int(node)][state] += size_mb
+            size_gb = convert_to_gb(size_str)
+            node_memory[int(node)][state] += size_gb
 
             if show_online and state == "online":
                 filtered_lines.append(line)
@@ -60,7 +60,7 @@ def parse_file(filename, show_online=False, show_offline=False, show_per_node=Fa
         if show_per_node:
             filtered_lines.append("\nPer-Node Memory Summary:")
             for node, sizes in sorted(node_memory.items()):
-                filtered_lines.append(f"Node {node}: Online: {sizes['online']} MB, Offline: {sizes['offline']} MB")
+                filtered_lines.append(f"Node {node}: Online: {sizes['online']:.2f} GB, Offline: {sizes['offline']:.2f} GB")
 
         return filtered_lines + keyword_lines
 
