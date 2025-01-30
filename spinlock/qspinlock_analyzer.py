@@ -102,20 +102,26 @@ def analyze_qspinlock(counter, rhel_version):
 
     elif locked != 0:
         if tail_index == 0:
-            print("🔒 Lock is HELD, but NO CPUs are waiting. The current owner may be executing a critical section.")
+            if pending == 0:
+                print("🔒 Lock is HELD, but NO CPUs are waiting. The current owner may be executing a critical section.")
+            else:
+                print("⚠️ Inconsistent state detected! Pending bit is set, but no CPUs are queued. Possible race condition or spinlock corruption.")
         elif tail_index > 0 and tail_cpu >= 0:
             print(f"🔄 Lock is HELD, and {tail_index} CPU(s) are WAITING.")
             print(f"  - The last CPU to join the queue is CPU {tail_cpu}.")
             if pending:
-                print("  - A pending waiter is actively spinning (could indicate high contention).")
+                print("  - A pending waiter is actively spinning (indicating contention).")
             else:
-                print("  - No active waiter spinning; CPUs may be sleeping or scheduled to wake up.")
+                print("  - No active waiter spinning; queued CPUs may be sleeping or scheduled to wake up.")
 
         if tail_index > 5:
-            print("⚠️ High contention detected! Consider optimizing locking strategies.")
+            print("⚠️ High contention detected! More than 5 CPUs are waiting. Consider optimizing locking strategies.")
 
-    if pending == 1 and locked != 0:
-        print("⚠️ Lock is held, and a waiter is in a pending loop. Possible performance issue.")
+    if pending == 1 and tail_index > 0:
+        print("⚠️ Lock is held, and a waiter is in a pending loop. This indicates potential contention.")
+
+    if pending == 1 and tail_index == 0:
+        print("❗ Warning: Pending bit is set, but no CPUs are queued. This may indicate a race condition.")
 
     if tail_cpu < 0 and tail_index > 0:
         print("⚠️ Invalid tail CPU detected! This could indicate a corrupted spinlock state.")
