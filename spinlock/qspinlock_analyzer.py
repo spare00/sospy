@@ -21,10 +21,31 @@ def format_binary(counter, bitfield):
     # Return formatted binary with single spaces
     return f"{tail_cpu_bits} {tail_index_bits} {unused_bits} {pending_bits} {locked_bits}"
 
+def show_qspinlock_flowchart():
+    """ Display the qspinlock state transition flowchart. """
+    print("\n=== QSpinlock Flowchart ===")
+    print(r"""
+(queue tail, pending bit, lock value)
+
+                fast     :    slow                                  :    unlock
+                         :                                          :
+ uncontended    (0,0,0) -:--> (0,0,1) ------------------------------:--> (*,*,0)
+                         :       | ^--------.------.             /  :
+                         :       v           \      \            |  :
+ pending                 :    (0,1,1) +--> (0,1,0)   \           |  :
+                         :       | ^--'              |           |  :
+                         :       v                   |           |  :
+ uncontended             :    (n,x,y) +--> (n,0,0) --'           |  :
+   queue                 :       | ^--'                          |  :
+                         :       v                               |  :
+ contended               :    (*,x,y) +--> (*,0,0) ---> (*,0,1) -'  :
+   queue                 :         ^--'                             :
+    """)
+    print("========================\n")
+
 def analyze_qspinlock(counter, rhel_version):
-    """
-    Analyze qspinlock status based on the given counter value and RHEL version.
-    """
+    """ Analyze qspinlock status based on the given counter value and RHEL version. """
+
     # Define bitfield positions based on RHEL version
     if rhel_version == 7:
         bitfield = {
@@ -78,7 +99,7 @@ def analyze_qspinlock(counter, rhel_version):
             print("✅ Lock is FREE. No CPUs are waiting.")
         else:
             print("⚠️ Lock is free, but tail index is non-zero. This could indicate a release race condition.")
-    
+
     elif locked != 0:
         if tail_index == 0:
             print("🔒 Lock is HELD, but NO CPUs are waiting. The current owner may be executing a critical section.")
@@ -104,14 +125,20 @@ def analyze_qspinlock(counter, rhel_version):
 # Main Execution
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Analyze qspinlock status in RHEL systems.")
-    parser.add_argument("counter", type=str, help="qspinlock counter value (decimal or hex)")
+    parser.add_argument("counter", nargs="?", type=lambda x: int(x, 0), help="qspinlock counter value (decimal or hex)")
     parser.add_argument("-r", "--rhel", type=int, choices=[7, 8, 9], default=8, help="Specify RHEL version (7, 8, or 9). Default is RHEL 8/9.")
-    
+    parser.add_argument("-f", "--flowchart", action="store_true", help="Display qspinlock flowchart.")
+
     args = parser.parse_args()
 
-    try:
-        counter = int(args.counter, 0)  # Accept decimal or hex (0x...)
-        analyze_qspinlock(counter, args.rhel)
-    except ValueError:
-        print("Error: Invalid counter value. Please provide a valid integer (decimal or hex).")
+    # Show flowchart if requested
+    if args.flowchart:
+        show_qspinlock_flowchart()
+
+    # If a counter value is provided, analyze it
+    if args.counter is not None:
+        analyze_qspinlock(args.counter, args.rhel)
+    elif not args.flowchart:
+        print("Error: Missing required argument: counter")
+        parser.print_help()
         sys.exit(1)
