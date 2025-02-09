@@ -3,21 +3,26 @@
 import sys
 import argparse
 
-def check_integrity(count, owner, signed_count, reader_owned, writer_task_struct):
+def check_integrity(count, owner, signed_count, reader_owned, writer_task_struct, rhel_version):
     """ Perform logical integrity checks on rw_semaphore values. """
 
     issues = []
 
     # 1️⃣ **Check for Read-Lock Consistency**
-    if signed_count > 0:  # Positive count means read-locked
-        if not reader_owned:
-            issues.append("  ⚠️ **Inconsistent State:** `count` is positive (read-locked), "
-                          "but `owner` does not indicate reader ownership.")
-
-        if writer_task_struct != 0 and not reader_owned:
-            issues.append("  ⚠️ **Suspicious Owner:** `count` is positive (read-locked), "
-                          "but `owner` is nonzero without `RWSEM_READER_OWNED`. "
-                          "A writer may have failed to clear it.")
+    if signed_count > 0:
+        if rhel_version == 8:
+            if not reader_owned:
+                issues.append("⚠️ **Inconsistent State:** `count` is positive (read-locked), "
+                              "but `owner` does not indicate reader ownership.")
+            if writer_task_struct != 0 and not reader_owned:
+                issues.append("⚠️ **Suspicious Owner:** `count` is positive (read-locked), "
+                              "but `owner` is nonzero without `RWSEM_READER_OWNED`. "
+                              "A writer may have failed to clear it.")
+        elif rhel_version == 7:
+            if writer_task_struct != 0:
+                issues.append("⚠️ **Suspicious Owner:** `count` is positive (read-locked), "
+                              "but `owner` is nonzero. In RHEL 7, only writers set `owner`, "
+                              "so this is unexpected.")
 
     # 2️⃣ **Check for Write-Lock Consistency**
     elif signed_count < 0:  # Negative count means write-locked
@@ -93,7 +98,7 @@ def format_owner(owner):
 
     return formatted_binary, reader_owned, nonspinnable, task_address_bits
 
-def analyze_rw_semaphore(count, owner, arch="64-bit", verbose=False):
+def analyze_rw_semaphore(count, owner, arch="64-bit", verbose=False, rhel_version=8):
     """ Analyze the rw_semaphore state based on the given count and owner values. """
 
     RWSEM_WRITER_LOCKED = 0x1  # Bit 0
@@ -129,7 +134,7 @@ def analyze_rw_semaphore(count, owner, arch="64-bit", verbose=False):
     print(f"\n🚨 **RW Semaphore Integrity Check** 🚨")
 
     # ✅ Run the logical consistency checks
-    integrity_issues = check_integrity(count, owner, signed_count, reader_owned, writer_task_struct)
+    integrity_issues = check_integrity(count, owner, signed_count, reader_owned, writer_task_struct, rhel_version)
 
     if integrity_issues:
         for issue in integrity_issues:
@@ -192,16 +197,19 @@ def analyze_rw_semaphore(count, owner, arch="64-bit", verbose=False):
     print("\n🔍 **Breakdown of RW Semaphore Owner Field**")
     print(f"  🔢 **Binary Owner Value:** `{binary_owner}`")
     print(f"  🏷 **Task Struct Address:** `{b_task_address}`")
-    
-    print(f"  🔄 **Non-Spinnable Bit (Bit 1):** `{b_nonspinnable}`")
-    if verbose:
-        print("     - 1 = A waiting writer has stopped spinning")
-        print("     - 0 = Normal behavior")
 
-    print(f"  📖 **Reader Owned Bit (Bit 0):** `{b_reader_owned}`")
-    if verbose:
-        print("     - 1 = A reader currently owns the lock")
-        print("     - 0 = Not reader-owned (could be a writer or empty)")
+    if rhel_version == 8:
+        print(f"  🔄 **Non-Spinnable Bit (Bit 1):** `{b_nonspinnable}`")
+        if verbose:
+            print("     - 1 = A waiting writer has stopped spinning")
+            print("     - 0 = Normal behavior")
+
+        print(f"  📖 **Reader Owned Bit (Bit 0):** `{b_reader_owned}`")
+        if verbose:
+            print("     - 1 = A reader currently owns the lock")
+            print("     - 0 = Not reader-owned (could be a writer or empty)")
+    else:
+        print("  ℹ️ **(RHEL 7)** The `owner` field should only be set by writers.")
 
 # Main Execution
 if __name__ == "__main__":
@@ -210,7 +218,9 @@ if __name__ == "__main__":
     parser.add_argument("owner", type=lambda x: int(x, 0))
     parser.add_argument("-a", "--arch", choices=["32-bit", "64-bit"], default="64-bit")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable detailed breakdown of bit fields.")
+    parser.add_argument("-r", "--rhel-version", type=int, choices=[7, 8], default=8,
+                    help="Specify RHEL version (7 or 8). Default is 8.")
 
     args = parser.parse_args()
 
-    analyze_rw_semaphore(args.count, args.owner, args.arch, args.verbose)
+    analyze_rw_semaphore(args.count, args.owner, args.arch, args.verbose, args.rhel_version)
