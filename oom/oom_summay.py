@@ -154,6 +154,15 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
             'Free CMA': (mb_conversion(memory_info['free_cma']), mb_conversion(memory_info['free_cma']) / 1024, memory_info['free_cma']),
         })
 
+    unaccounted_memory_mb = unaccounted_memory_mb - mb_conversion(memory_info['isolated_anon']) \
+                                                  - mb_conversion(memory_info['isolated_file']) \
+                                                  - mb_conversion(memory_info['unevictable']) \
+                                                  - mb_conversion(memory_info['dirty']) \
+                                                  - mb_conversion(memory_info['writeback']) \
+                                                  - mb_conversion(memory_info['mapped']) \
+                                                  - mb_conversion(memory_info['bounce']) \
+                                                  - mb_conversion(memory_info['free_cma']) 
+
     # Return memory summary, total memory details, etc.
     return memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb
 
