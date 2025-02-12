@@ -80,9 +80,9 @@ def extract_memory_info(log_data):
 
     return mem_info_list
 
-def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, show_full):
+def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, show_full, pagesize_kb):
     """Calculate memory usage summary from memory info."""
-    page_size_kb = 4  # Page size in KB
+    page_size_kb = pagesize_kb if pagesize_kb else 4  # Page size in KB
     mb_conversion = lambda x: x * page_size_kb / 1024 if x else 0
 
     total_memory_pages = memory_info.pop('total_pages_ram', 0)
@@ -200,12 +200,14 @@ def main():
     parser.add_argument('-p', '--pages', action='store_true', help="Show memory usage in pages.")
     parser.add_argument('-u', '--unaccounted', action='store_true', help="Show unaccounted memory.")
     parser.add_argument('-f', '--full', action='store_true', help="Show full memory info.")
-    
+    parser.add_argument('-s', '--pagesize', metavar='SIZE_KB', type=int, default=4, help="Set custom page size in KB (default: 4 KB).")
+ 
     # Define the positional argument for log file name
     parser.add_argument('log_filename', metavar='log_filename', type=str, help="Log file to parse.")
     
     # Parse arguments
     args = parser.parse_args()
+    pagesize_kb = args.pagesize
     
     show_pages = args.pages
     show_unaccounted = args.unaccounted
@@ -220,7 +222,7 @@ def main():
     for timestamp, memory_info, total_hugepages_kb, used_hugepages_kb in mem_info_list:
         # Calculate memory usage, now including hugepage memory
         memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb = calculate_memory_usage(
-            memory_info, total_hugepages_kb, used_hugepages_kb, show_full)
+            memory_info, total_hugepages_kb, used_hugepages_kb, show_full, pagesize_kb)
 
         # Print memory summary for each event
         print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages,
