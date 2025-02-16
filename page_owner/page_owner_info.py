@@ -178,19 +178,33 @@ def convert_memory(memory_kb, unit):
         raise ValueError(f"Invalid unit: {unit}. Use 'K', 'M', or 'G'.")
 
 def show_allocations_by_process(process_data, top_n=10, unit='G', verbose=False):
+    if not process_data:
+        print("No process data available.")
+        return
+
+    # Filter out invalid process names (None)
+    valid_process_data = {k: v for k, v in process_data.items() if k is not None}
+
     print(f"{'Process':<20}{'Allocations':>12}{f'Memory ({unit})':>15}")
     print("=" * 47)
 
     # Sort processes by memory usage and take the top N
-    sorted_processes = sorted(process_data.items(), key=lambda x: x[1]['memory_kb'], reverse=True)
+    sorted_processes = sorted(valid_process_data.items(), key=lambda x: x[1]['memory_kb'], reverse=True)
 
     total_allocations = sum(data['allocations'] for data in process_data.values())
     total_memory_kb = sum(data['memory_kb'] for data in process_data.values())
 
+    found_processes = False  # Track if at least one process is printed
+
     # Display only the top N processes
     for process, data in sorted_processes[:top_n]:
         memory, unit_label = convert_memory(data['memory_kb'], unit)
-        print(f"{process:<20}{data['allocations']:>12}{memory:>15.2f} {unit_label}")
+        if process is not None:
+            print(f"{process:<20}{data['allocations']:>12}{memory:>15.2f} {unit_label}")
+        found_processes = True  # Mark that a process was found
+
+    if not found_processes:
+        print("No process data found.")  # If loop didn't print anything
 
     # Print totals for all processes
     total_memory, unit_label = convert_memory(total_memory_kb, unit)
