@@ -467,12 +467,6 @@ def main():
         force=True
     )
 
-    # Ensure at least one action is specified
-    if not any([args.modules, args.orders, args.processes is not None, args.total, args.call_traces is not None]):
-        logging.warning("No valid actions specified. Use --help for usage information.")
-        parser.print_help()
-        return
-
     process_data, allocations_by_module, allocations_by_order, calltraces, slab_usage, non_slab_usage, app_slab_usage, app_non_slab_usage = parse_page_owner_file(args.file)
 
     # Execute actions based on options
@@ -484,7 +478,6 @@ def main():
         show_slab_usage_by_order(slab_usage, non_slab_usage, unit=args.unit, verbose=args.verbose)
     elif args.processes is not None:
         show_allocations_by_process(process_data, args.processes, unit=args.unit, verbose=args.verbose)
-
     elif args.call_traces is not None:
         show_top_call_traces(calltraces, args.call_traces, filter_process=args.filter_process, verbose=args.verbose)
     elif args.modules and args.orders:
@@ -495,6 +488,8 @@ def main():
         show_allocations_by_order(allocations_by_order, unit=args.unit, verbose=args.verbose)
     elif args.total:
         show_summary(allocations_by_order, unit=args.unit)
+    else:
+        show_allocations_by_process(process_data, 10, unit=args.unit, verbose=args.verbose)
 
 if __name__ == "__main__":
     main()
