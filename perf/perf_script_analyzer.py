@@ -5,7 +5,27 @@ import argparse
 from collections import Counter
 import re
 
-def parse_perf_script(file_path, target_pid=None, target_cmd=None):
+def normalize_function_line(line, ignore_addr=False):
+    """
+    Optionally removes memory offsets and symbol addresses for better call trace grouping.
+    Example:
+        If ignore_addr=True:
+            "ffffffff9d2f002e __stop_notes+0x122c82 ([kernel.kallsyms])"
+            → "__stop_notes ([kernel.kallsyms])"
+        If ignore_addr=False (default):
+            "ffffffff9d2f002e __stop_notes+0x122c82 ([kernel.kallsyms])"
+            → "ffffffff9d2f002e __stop_notes+0x122c82 ([kernel.kallsyms])"
+    """
+    if ignore_addr:
+        # Remove addresses (hex values at the start of the line)
+        line = re.sub(r'^[a-fA-F0-9]+ ', '', line)
+
+        # Remove memory offsets in function names (e.g., `+0x123abc`)
+        line = re.sub(r'\+0x[a-fA-F0-9]+', '', line)
+
+    return line.strip()
+
+def parse_perf_script(file_path, target_pid=None, target_cmd=None, ignore_addr=False):
     """
     Parses the perf script output and extracts full stack traces.
     If a PID or command name is specified, filters call traces accordingly.
@@ -15,7 +35,7 @@ def parse_perf_script(file_path, target_pid=None, target_cmd=None):
 
     traces = []
     current_trace = []
-    header = None  # Stores the process line (only process name)
+    header = None  # Stores the process name only
     include_trace = target_pid is None and target_cmd is None  # If no filter, include all
 
     for line in lines:
@@ -48,18 +68,18 @@ def parse_perf_script(file_path, target_pid=None, target_cmd=None):
                 current_trace = []
 
         elif include_trace:
-            current_trace.append(line)  # Collect function calls
+            current_trace.append(normalize_function_line(line, ignore_addr))  # Apply optional address normalization
 
     if include_trace and current_trace:
         traces.append((header, tuple(current_trace)))  # Store last trace
 
     return traces
 
-def find_top_call_traces(file_path, target_pid=None, target_cmd=None, n_top=5):
+def find_top_call_traces(file_path, target_pid=None, target_cmd=None, n_top=5, ignore_addr=False):
     """
     Finds the top N most common full call trace patterns.
     """
-    traces = parse_perf_script(file_path, target_pid, target_cmd)
+    traces = parse_perf_script(file_path, target_pid, target_cmd, ignore_addr)
 
     # Count occurrences of call stacks (grouped by function calls only, with minimal header)
     trace_counter = Counter(trace for _, trace in traces)
@@ -69,6 +89,8 @@ def find_top_call_traces(file_path, target_pid=None, target_cmd=None, n_top=5):
         return
 
     filter_msg = f"for PID {target_pid}" if target_pid else (f"for command {target_cmd}" if target_cmd else "for all processes")
+    if ignore_addr:
+        filter_msg += " (Ignoring Symbol Addresses & Offsets)"
     print(f"Top {n_top} most common call trace patterns {filter_msg}:\n")
 
     for i, (trace, count) in enumerate(trace_counter.most_common(n_top), 1):
@@ -87,6 +109,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--pid", help="Process ID (PID) to filter call traces (optional)")
     parser.add_argument("-c", "--cmd", help="Command name to filter call traces (optional)")
     parser.add_argument("-n", "--n_top", type=int, default=5, help="Number of top call traces to display (default: 5)")
+    parser.add_argument("-g", "--ignore-addr", action="store_true", help="Ignore symbol addresses and memory offsets for better grouping")
 
     args = parser.parse_args()
 
@@ -95,4 +118,4 @@ if __name__ == "__main__":
         print("Error: -p (PID) and -c (command) options cannot be used together.")
         sys.exit(1)
 
-    find_top_call_traces(args.file, args.pid, args.cmd, args.n_top)
+    find_top_call_traces(args.file, args.pid, args.cmd, args.n_top, args.ignore_addr)
