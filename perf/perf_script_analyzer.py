@@ -3,6 +3,7 @@
 import sys
 import argparse
 from collections import Counter
+import re
 
 def parse_perf_script(file_path, target_pid=None, target_cmd=None):
     """
@@ -14,7 +15,7 @@ def parse_perf_script(file_path, target_pid=None, target_cmd=None):
 
     traces = []
     current_trace = []
-    header = None  # Stores the process line with PID, timestamp, and cycles
+    header = None  # Stores the simplified process name only
     include_trace = target_pid is None and target_cmd is None  # If no filter, include all
 
     for line in lines:
@@ -22,21 +23,28 @@ def parse_perf_script(file_path, target_pid=None, target_cmd=None):
         if not line:
             continue
 
-        # Detect new stack trace start (process line format: sipMgr 242277 [XXX] timestamp: cycles:)
+        # Detect new stack trace start (process line format: sipMgr 242277 [XXX] TIMESTAMP: cycles:)
         parts = line.split()
-        if len(parts) >= 4 and parts[0].isalpha() and parts[1].isdigit() and "[" in parts[2]:
+        if len(parts) >= 4 and parts[0].isalpha() and parts[1].isdigit() and "[" in parts[2]:  
             cmd = parts[0]  # Command name (e.g., sipMgr)
             pid = parts[1]  # Process ID
 
-            if (target_pid and pid == target_pid) or (target_cmd and cmd == target_cmd) or (target_pid is None and target_cmd is None):
+            if target_pid and pid == target_pid:
                 include_trace = True
+            elif target_cmd and cmd == target_cmd:
+                include_trace = True
+            elif target_pid is None and target_cmd is None:
+                include_trace = True  # No filter, include all
             else:
                 include_trace = False
 
             if include_trace:
                 if current_trace:
                     traces.append((header, tuple(current_trace)))  # Store previous trace
-                header = line  # Store new header line
+                
+                # Simplify header to only include process name
+                header = f"{cmd}:"
+
                 current_trace = []
 
         elif include_trace:
@@ -53,7 +61,7 @@ def find_top_call_traces(file_path, target_pid=None, target_cmd=None, top_n=10):
     """
     traces = parse_perf_script(file_path, target_pid, target_cmd)
 
-    # Count occurrences of call stacks (excluding process headers)
+    # Count occurrences of call stacks (grouped by function calls only, with minimal header)
     trace_counter = Counter(trace for _, trace in traces)
 
     if not trace_counter:
@@ -68,7 +76,7 @@ def find_top_call_traces(file_path, target_pid=None, target_cmd=None, top_n=10):
         header = next(h for h, t in traces if t == trace)
 
         print(f"#{i}: Occurrences: {count}")
-        print(header)  # Print the process line (e.g., sipMgr 242277 [017] ...)
+        print(header)  # Print the simplified process line (e.g., sipMgr:)
         for func in trace:
             print(f"    {func}")  # Preserve original formatting with indentation
         print("-" * 80)
@@ -87,4 +95,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     find_top_call_traces(args.file, args.pid, args.cmd)
-
