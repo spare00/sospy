@@ -15,7 +15,7 @@ def parse_perf_script(file_path, target_pid=None, target_cmd=None):
 
     traces = []
     current_trace = []
-    header = None  # Stores the simplified process name only
+    header = None  # Stores the process line (only process name)
     include_trace = target_pid is None and target_cmd is None  # If no filter, include all
 
     for line in lines:
@@ -55,7 +55,7 @@ def parse_perf_script(file_path, target_pid=None, target_cmd=None):
 
     return traces
 
-def find_top_call_traces(file_path, target_pid=None, target_cmd=None, top_n=10):
+def find_top_call_traces(file_path, target_pid=None, target_cmd=None, n_top=5):
     """
     Finds the top N most common full call trace patterns.
     """
@@ -69,9 +69,9 @@ def find_top_call_traces(file_path, target_pid=None, target_cmd=None, top_n=10):
         return
 
     filter_msg = f"for PID {target_pid}" if target_pid else (f"for command {target_cmd}" if target_cmd else "for all processes")
-    print(f"Top {top_n} most common call trace patterns {filter_msg}:\n")
+    print(f"Top {n_top} most common call trace patterns {filter_msg}:\n")
 
-    for i, (trace, count) in enumerate(trace_counter.most_common(top_n), 1):
+    for i, (trace, count) in enumerate(trace_counter.most_common(n_top), 1):
         # Find the first occurrence of this stack to retrieve its original process header
         header = next(h for h, t in traces if t == trace)
 
@@ -86,6 +86,7 @@ if __name__ == "__main__":
     parser.add_argument("file", help="Path to the perf script output file")
     parser.add_argument("-p", "--pid", help="Process ID (PID) to filter call traces (optional)")
     parser.add_argument("-c", "--cmd", help="Command name to filter call traces (optional)")
+    parser.add_argument("-n", "--n_top", type=int, default=5, help="Number of top call traces to display (default: 5)")
 
     args = parser.parse_args()
 
@@ -94,4 +95,4 @@ if __name__ == "__main__":
         print("Error: -p (PID) and -c (command) options cannot be used together.")
         sys.exit(1)
 
-    find_top_call_traces(args.file, args.pid, args.cmd)
+    find_top_call_traces(args.file, args.pid, args.cmd, args.n_top)
