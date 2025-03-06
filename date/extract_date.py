@@ -4,7 +4,7 @@ import dateutil.parser
 import sys
 from dateutil.tz import gettz
 
-# Define a mapping for timezone abbreviations
+# Timezone mappings
 tzinfos = {
     "UTC": gettz("UTC"),
     "EDT": gettz("America/New_York"),
@@ -31,7 +31,6 @@ tzinfos = {
     "AKST": gettz("America/Anchorage"),
     "AST": gettz("America/Halifax"),
     "AWST": gettz("Australia/Perth"),
-    "CST": gettz("Asia/Shanghai"), # Note that CST can also be China Standard Time
     "HKT": gettz("Asia/Hong_Kong"),
     "HST": gettz("Pacific/Honolulu"),
     "KST": gettz("Asia/Seoul"),
@@ -41,10 +40,16 @@ tzinfos = {
     "SGT": gettz("Asia/Singapore"),
     "WAT": gettz("Africa/Lagos"),
     "WET": gettz("Europe/Lisbon")
-    # Add more timezones as needed
 }
 
+# Read input and extract date
 date_str = sys.stdin.read().strip()
-parsed_date = dateutil.parser.parse(date_str, fuzzy=True, tzinfos=tzinfos)
-#print(parsed_date.date())
-print(parsed_date.strftime("%d"))
+if "Local time:" in date_str:
+    date_str = date_str.split("Local time:")[-1].strip()  # Extract actual date part
+
+try:
+    parsed_date = dateutil.parser.parse(date_str, fuzzy=True, tzinfos=tzinfos)
+    print(parsed_date.strftime("%d"))  # Print the day of the month
+except Exception as e:
+    print(f"Error parsing date: {e}", file=sys.stderr)
+    sys.exit(1)
