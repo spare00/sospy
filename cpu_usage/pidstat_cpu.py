@@ -25,17 +25,17 @@ def parse_pidstat_line_short(line):
 
         # Extract fields after the timestamp
         fields = re.split(r'\s+', line.strip())[3:]  # Ignore timestamp parts
-        
+ 
         if len(fields) < 8:
             return None
 
         user = fields[0]  # UID column
         usr, system, wait, cpu = map(lambda x: float(x.strip('%')), (fields[2], fields[3], fields[5], fields[6]))
         command = fields[-1]  # Last column is the command
-
         return user, usr, system, wait, cpu, command.strip()
 
     except (ValueError, IndexError):
+        print(line)
         return None  # Ignore malformed lines
 
 def parse_pidstat_line_verbose(line):
@@ -72,9 +72,8 @@ def calculate_usage(filename, group_by, sort_by, debug=False):
         return
 
     for line in lines:
-        if "Linux" in line or "Time" in line or "UID" in line or "USER" in line:  # Ignore headers
+        if "^Linux" in line or "Time" in line or "UID" in line or "USER" in line:  # Ignore headers
             continue
-
         parsed_data = parse_pidstat_line_short(line) if format_type == "short" else parse_pidstat_line_verbose(line)
         if not parsed_data:
             continue
