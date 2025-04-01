@@ -161,64 +161,85 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
                                                   - mb_conversion(memory_info['writeback']) \
                                                   - mb_conversion(memory_info['mapped']) \
                                                   - mb_conversion(memory_info['bounce']) \
-                                                  - mb_conversion(memory_info['free_cma']) 
+                                                  - mb_conversion(memory_info['free_cma'])
 
     # Return memory summary, total memory details, etc.
     return memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb
 
-def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, show_pages, show_unaccounted):
+def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, show_in_page, show_in_gb, show_unaccounted, show_in_mb=True):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
     # Only show the Timestamp, without any additional "Event" lines.
     header = f"\nTimestamp: {timestamp}"
+    header += f"\n{'Category':<25}"
+    lines = 25
 
-    if show_pages:
-        header += f"\n{'Category':<25} {'Pages':>15} {'MB':>15} {'GB':>10}\n{'='*68}"
-    else:
-        header += f"\n{'Category':<25} {'MB':>15} {'GB':>10}\n{'='*52}"
+    if show_in_page:
+        header += f" {'Pages':>15}"
+        lines +=16
+    if show_in_mb:
+        header += f" {'MB':>15}"
+        lines +=16
+    if show_in_gb:
+        header += f" {'GB':>10}"
+        lines +=11
 
+    header += f"\n{'='*lines}"
     print(header)
 
     for key, (mb, gb, pages) in memory_summary.items():
-        if show_pages:
-            print(f"{key:<25} {pages:>15,} {mb:>15,.2f} {gb:>10,.2f}")
-        else:
-            print(f"{key:<25} {mb:>15,.2f} {gb:>10,.2f}")
+        body = f"{key:<25}"
+        if show_in_page:
+            body += f" {pages:>15,}"
+        if show_in_mb:
+            body += f"{mb:>15,.2f} "
+        if show_in_gb:
+            body += f" {gb:>10,.2f}"
+        print(body)
 
     # Print the unaccounted memory if the -u flag is provided
     if show_unaccounted:
-        print(f"{'-'*68}")
-        if show_pages:
-            print(f"{'Unaccounted Memory':<25} {'':>15} {unaccounted_memory_mb:>15,.2f} {unaccounted_memory_mb/1024:>10,.2f}")
-        else:
-            print(f"{'Unaccounted Memory':<25} {unaccounted_memory_mb:>15,.2f} {unaccounted_memory_mb/1024:>10,.2f}")
+        body_unaccounted = f"{'-'*lines}\n{'Unaccounted Memory':<25}"
+        if show_in_page:
+            body_unaccounted += f" {'':>15}"
+        if show_in_mb:
+            body_unaccounted += f" {unaccounted_memory_mb:>15,.2f}"
+        if show_in_gb:
+            body_unaccounted += f" {unaccounted_memory_mb/1024:>10,.2f}"
+        print(body_unaccounted)
 
     # Print the total memory size at the bottom
-    if show_pages:
-        print(f"{'-'*68}")
-        print(f"{'Total Memory':<25} {total_memory_pages:>15,} {total_memory_mb:>15,.2f} {total_memory_gb:>10,.2f}")
-    else:
-        print(f"{'-'*52}")
-        print(f"{'Total Memory':<25} {total_memory_mb:>15,.2f} {total_memory_gb:>10,.2f}")
-    print("\n")
+    tail = f"{'Total Memory':<25}"
+    if show_in_page:
+        tail += f" {total_memory_pages:>15,}"
+    if show_in_mb:
+        tail += f" {total_memory_mb:>15,.2f}"
+    if show_in_gb:
+        tail += f" {total_memory_gb:>10,.2f}"
+    tail = f"{'='*lines}\n" + tail
+    print(tail)
 
 def main():
     # Use argparse for flexible option parsing
     parser = argparse.ArgumentParser(description="Parse OOM logs and display memory summaries.")
-    
+
     # Define the flags
-    parser.add_argument('-p', '--pages', action='store_true', help="Show memory usage in pages.")
+    parser.add_argument('-p', '--page', action='store_true', help="Show memory usage in page.")
+    parser.add_argument('-g', '--gigabyte', action='store_true', help="Show memory usage in GB.")
+    parser.add_argument('-m', '--megabyte', action='store_true', help="Show memory usage in MB.")
     parser.add_argument('-u', '--unaccounted', action='store_true', help="Show unaccounted memory.")
     parser.add_argument('-f', '--full', action='store_true', help="Show full memory info.")
     parser.add_argument('-s', '--pagesize', metavar='SIZE_KB', type=int, default=4, help="Set custom page size in KB (default: 4 KB).")
- 
+
     # Define the positional argument for log file name
     parser.add_argument('log_filename', metavar='log_filename', type=str, help="Log file to parse.")
-    
+
     # Parse arguments
     args = parser.parse_args()
     pagesize_kb = args.pagesize
-    
-    show_pages = args.pages
+
+    show_in_page = args.page
+    show_in_gb = args.gigabyte
+    show_in_mb = True if not args.megabyte and not show_in_gb and not show_in_page else args.megabyte
     show_unaccounted = args.unaccounted
     show_full = args.full
     log_filename = args.log_filename
@@ -235,7 +256,9 @@ def main():
 
         # Print memory summary for each event
         print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages,
-                      unaccounted_memory_mb, timestamp, show_pages, show_unaccounted)
+                      unaccounted_memory_mb, timestamp, show_in_page, show_in_gb, show_unaccounted,
+                      show_in_mb)
 
 if __name__ == "__main__":
     main()
+
