@@ -40,8 +40,10 @@ if not os.path.isfile(filename):
     sys.exit(1)
 
 # List of memory fields to look for
-fields = ["MemTotal", "MemFree", "Buffers", "Cached", "Slab", "KernelStack",
-          "PageTables", "Percpu", "AnonPages", "Active(anon)", "Inactive(anon)",
+fields = ["MemTotal", "MemFree", "Buffers", "Cached", "SwapCached", 
+          "Active(anon)", "Inactive(anon)", "AnonPages", 
+          "Unevictable", "Slab", "KernelStack",
+          "PageTables", "Percpu", 
           "HugePages_Total", "Hugepagesize"]
 
 meminfo = {}
