@@ -136,6 +136,8 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
             'Mapped': (mb_conversion(memory_info['mapped']), gb_conversion(memory_info['mapped']), memory_info['mapped']),
             'Bounce': (mb_conversion(memory_info['bounce']), gb_conversion(memory_info['bounce']), memory_info['bounce']),
             'Free CMA': (mb_conversion(memory_info['free_cma']), gb_conversion(memory_info['free_cma']), memory_info['free_cma']),
+            'Swap cache': (mb_conversion(memory_info['swapcache']), gb_conversion(memory_info['swapcache']), memory_info['swapcache']),
+
         })
 
     # Subtract the rest accounted memory
@@ -144,11 +146,11 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
                           - mb_conversion(memory_info['inactive_anon']) \
                           - mb_conversion(memory_info['isolated_anon']) \
                           - mb_conversion(memory_info['pagecache']) \
+                          - mb_conversion(memory_info['swapcache']) \
                           - mb_conversion(memory_info['slab_reclaimable']) \
                           - mb_conversion(memory_info['slab_unreclaimable']) \
                           - mb_conversion(memory_info['pagetables']) \
                           - mb_conversion(memory_info['free']) \
-                          - mb_conversion(memory_info['free_pcp']) \
                           - mb_conversion(memory_info['reserved']) \
                           - mb_conversion(memory_info['unevictable']) \
                           - mb_conversion(memory_info['bounce']) \
@@ -161,11 +163,11 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
 - Inactive Anon \
 - Isolated Anon \
 - Pagecache \
+- Swapcache \
 - Slab Reclaimable \
 - Slab Unreclaimable \
 - Pagetables \
 - Free \
-- Free Pcp \
 - Reserved \
 - Uevictable \
 - Bounce \
@@ -177,11 +179,11 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
 - {mb_conversion(memory_info.get('inactive_anon', 0)):.2f} \
 - {mb_conversion(memory_info.get('isolated_anon')):.2f} \
 - {mb_conversion(memory_info.get('pagecache', 0)):.2f} \
+- {mb_conversion(memory_info.get('swapcache', 0)):.2f} \
 - {mb_conversion(memory_info.get('slab_reclaimable', 0)):.2f} \
 - {mb_conversion(memory_info.get('slab_unreclaimable', 0)):.2f} \
 - {mb_conversion(memory_info.get('pagetables', 0)):.2f} \
 - {mb_conversion(memory_info.get('free', 0)):.2f} \
-- {mb_conversion(memory_info.get('free_pcp', 0)):.2f} \
 - {mb_conversion(memory_info.get('reserved', 0)):.2f} \
 - {mb_conversion(memory_info.get('unevictable')):.2f} \
 - {mb_conversion(memory_info.get('bounce')):.2f} \

@@ -21,6 +21,7 @@ patterns = {
     'free_pcp': r'free_pcp:(\d+)',
     'free_cma': r'free_cma:(\d+)',
     'pagecache': r'(\d+) total pagecache pages',
+    'swapcache': r'(\d+) pages in swap cache',
     'reserved': r'(\d+) pages reserved',
     'total_pages_ram': r'(\d+) pages RAM',
     'free_swap': r'Free swap\s*=\s*(\d+)kB',
