@@ -3,33 +3,34 @@
 import sys
 import argparse
 
-def parse_slabinfo(file_path, show_top=False):
+DEFAULT_TOP_N = 10
+PAGE_SIZE_KB = 4  # Assuming 4 KB pages
+
+def parse_slabinfo(file_path):
     try:
         with open(file_path, 'r') as file:
             lines = file.readlines()
 
-        # Skip the first two lines of /proc/slabinfo, which are headers
         slab_data = []
         total_memory_mib = 0
 
-        for line in lines[2:]:  # Skip the headers
+        for line in lines[2:]:  # Skip headers
             fields = line.split()
-            if len(fields) < 7:  # Ensure there are enough columns
+            if len(fields) < 7:
                 continue
 
-            name = fields[0]  # Slab name
-            pagesperslab = int(fields[5])  # $6: Pages per slab
-            num_slabs = int(fields[-2])  # $(NF-1): Number of slabs in use
+            name = fields[0]
+            try:
+                pagesperslab = int(fields[5])
+                num_slabs = int(fields[-2])
+            except ValueError:
+                continue
 
-            # Calculate memory usage in MiB
-            memory_usage_mib = pagesperslab * num_slabs * 4 / 1024  # Convert to MiB
+            memory_usage_mib = pagesperslab * num_slabs * PAGE_SIZE_KB / 1024
             slab_data.append((memory_usage_mib, name))
             total_memory_mib += memory_usage_mib
 
-        if show_top:
-            # Sort by size in descending order and take the top 10
-            slab_data = sorted(slab_data, key=lambda x: x[0], reverse=True)[:10]
-
+        # Always return full data, selection is handled separately
         return slab_data, total_memory_mib
 
     except FileNotFoundError:
@@ -41,7 +42,7 @@ def parse_slabinfo(file_path, show_top=False):
 
 def format_slab_data(slab_data, total_memory_mib):
     result = []
-    header = f"{'Memory (MiB)':>15} | {'Slab Name':<30}"
+    header = f"{'Memory (MiB)':>15} | {'Slab Name':<20}"
     separator = "-" * len(header)
     result.append(header)
     result.append(separator)
@@ -49,24 +50,34 @@ def format_slab_data(slab_data, total_memory_mib):
     for size_mib, name in slab_data:
         result.append(f"{size_mib:15.1f} | {name:<30}")
 
-    # Add total memory usage at the bottom
-    total_memory_gb = total_memory_mib / 1024  # Convert total memory to GB
+    total_memory_gb = total_memory_mib / 1024
     result.append(separator)
-    result.append(f"{'Total':>15} | {total_memory_mib:10.1f} MiB ({total_memory_gb:.2f} GB)")
+    result.append(f"{'Total':>15} | {total_memory_mib:.1f} MiB ({total_memory_gb:.2f} GB)")
 
     return result
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze and display slab memory usage.")
     parser.add_argument("file", nargs="?", default="/proc/slabinfo", help="Path to the slabinfo file (default: /proc/slabinfo).")
-    parser.add_argument("-s", "--top-slabs", action="store_true", help="Show the top 10 slabs by memory usage.")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-a", "--all", action="store_true", help="Show all slabs.")
+    group.add_argument("-l", "--top", type=int, nargs="?", const=DEFAULT_TOP_N,
+                       help=f"Show top N slabs by memory usage (default: {DEFAULT_TOP_N}).")
+
     args = parser.parse_args()
 
-    # Parse the slabinfo file
-    slab_data, total_memory_mib = parse_slabinfo(args.file, show_top=args.top_slabs)
+    # Get slabinfo data
+    slab_data, total_memory_mib = parse_slabinfo(args.file)
 
-    # Format and print the results
-    formatted_data = format_slab_data(slab_data, total_memory_mib)
+    # Determine how many entries to show
+    if args.all:
+        display_data = sorted(slab_data, key=lambda x: x[0], reverse=True)
+    else:
+        top_n = args.top if args.top is not None else DEFAULT_TOP_N
+        display_data = sorted(slab_data, key=lambda x: x[0], reverse=True)[:top_n]
+
+    # Print formatted result
+    formatted_data = format_slab_data(display_data, total_memory_mib)
     for line in formatted_data:
         print(line)
 
