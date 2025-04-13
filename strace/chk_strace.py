@@ -3,6 +3,7 @@
 import argparse
 import re
 from collections import defaultdict, Counter
+from collections import defaultdict
 
 class Color:
     RED = '\033[91m'
@@ -229,6 +230,69 @@ def print_anomalies(flagged, total_time, total_runtime, durations,
     for err, count in flagged['error_types']:
         print(Color.MAGENTA + f"  ❗ High error rate: {err} occurred {count} times" + Color.RESET)
 
+# Syscall category mapping
+SYSCALL_CATEGORIES = {
+    'read': 'File IO', 'write': 'File IO', 'open': 'File IO', 'close': 'File IO',
+    'lseek': 'File IO', 'fsync': 'File IO', 'ioctl': 'File IO',
+    'clone': 'Process', 'fork': 'Process', 'execve': 'Process', 'wait4': 'Process',
+    'kill': 'Process',
+    'pipe': 'IPC', 'pipe2': 'IPC', 'socket': 'IPC', 'connect': 'IPC',
+    'sendto': 'IPC', 'recvfrom': 'IPC', 'sendmsg': 'IPC', 'recvmsg': 'IPC',
+    'rt_sigaction': 'Signal', 'rt_sigprocmask': 'Signal', 'rt_sigreturn': 'Signal',
+    'nanosleep': 'Timing', 'clock_gettime': 'Timing',
+    # Fallback if not found in map
+}
+
+def categorize_syscalls(total_time, counter):
+    category_time = defaultdict(float)
+    category_count = defaultdict(int)
+
+    for syscall, total in total_time.items():
+        category = SYSCALL_CATEGORIES.get(syscall, 'Other')
+        category_time[category] += total
+        category_count[category] += counter[syscall]
+
+    return category_time, category_count
+
+def calculate_percentiles(durations, percentile_list=(50, 90, 95, 99)):
+    from numpy import percentile
+
+    result = {}
+    for syscall, times in durations.items():
+        if len(times) >= 5:
+            result[syscall] = {
+                f'p{p}': percentile(times, p) for p in percentile_list
+            }
+    return result
+
+def print_extended_diagnostics(counter, total_time, durations, verbose=False):
+    from math import isclose
+
+    print("\n🧠 Extended Diagnostics:")
+
+    total_runtime = sum(total_time.values())
+    if not total_runtime:
+        print("  No runtime data available.")
+        return
+
+    # 🗂️ Syscall Category Summary
+    category_time, category_count = categorize_syscalls(total_time, counter)
+    print("\n📊 Syscall Categories (by total time):")
+    for category, t in sorted(category_time.items(), key=lambda x: x[1], reverse=True):
+        count = category_count[category]
+        ratio = t / total_runtime
+        print(f"  {category:<10}  {count:>6} calls  total: {t:.6f}s  ({ratio:.2%} of runtime)")
+
+    # 📈 Percentile Stats per Syscall
+    percentiles = calculate_percentiles(durations)
+    if percentiles:
+        print("\n📈 Duration Percentiles (for syscalls with ≥5 samples):")
+        for syscall, stats in sorted(percentiles.items(), key=lambda x: x[1].get('p99', 0), reverse=True):
+            stats_line = '  '.join(f"{k}: {v:.6f}s" for k, v in stats.items())
+            print(f"  {syscall:<20} {stats_line}")
+    else:
+        print("\n📈 No syscalls with enough data to calculate percentiles.")
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -322,6 +386,15 @@ def main():
         verbose=args.verbose,
         debug=args.debug
     )
+
+    if args.verbose:
+        print_extended_diagnostics(
+            counter,
+            total_time,
+            durations,
+            verbose=args.verbose
+        )
+
 
 if __name__ == "__main__":
     main()
