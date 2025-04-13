@@ -283,7 +283,7 @@ def calculate_percentiles(durations, percentile_list=(50, 90, 95, 99)):
             }
     return result
 
-def print_extended_diagnostics(counter, total_time, durations, inter_call_times=None, verbose=False):
+def print_extended_diagnostics(counter, total_time, durations, verbose=False, debug=False):
     from math import isclose
 
     print("\n🧠 Extended Diagnostics:")
@@ -311,13 +311,13 @@ def print_extended_diagnostics(counter, total_time, durations, inter_call_times=
     else:
         print("\n📈 No syscalls with enough data to calculate percentiles.")
 
-    if inter_call_times:
-        top_gaps = compute_inter_call_gaps(inter_call_times)
-        print("\n⏱️ Top Inter-Call Gaps (idle periods):")
-        for delta, before, after in top_gaps:
-            print(f"\n  🔹 Gap: {delta:.6f}s")
-            print(f"     Before: {before}")
-            print(f"     After : {after}")
+def print_duration_percentiles(inter_call_times, verbose=False, debug=False):
+    top_gaps = compute_inter_call_gaps(inter_call_times)
+    print("\n⏱️ Top Inter-Call Gaps (idle periods):")
+    for delta, before, after in top_gaps:
+        print(f"\n  🔹 Gap: {delta:.6f}s")
+        print(f"     Before: {before}")
+        print(f"     After : {after}")
 
     print("\nThis reflects application-level stalls, such as:")
     print("    • Waiting for a child process to finish")
@@ -339,47 +339,18 @@ def main():
         )
     )
 
-    parser.add_argument(
-        "file",
-        help="Path to strace output file (use strace -T to include syscall durations)"
-    )
-
-    parser.add_argument(
-        "-t", "--top", type=int, default=10,
-        help="Number of top syscalls to show in each summary section (default: 10)"
-    )
-
-    parser.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Show extra details (e.g. avg time, call counts) in diagnostics"
-    )
-
-    parser.add_argument(
-        "--time-dominance", type=float, default=0.5,
-        help=(
+    parser.add_argument( "file", help="Path to strace output file (use strace -T to include syscall durations)" )
+    parser.add_argument( "-t", "--top", type=int, default=10, help="Number of top syscalls to show in each summary section (default: 10)" )
+    parser.add_argument( "--time-dominance", type=float, default=0.5, help=(
             "Flag syscalls as dominant if they account for more than this fraction "
-            "of total runtime (default: 0.5). Yellow = >threshold/2, Red = >threshold"
-        )
-    )
-
-    parser.add_argument(
-        "--slow-ratio", type=float, default=10.0,
-        help=(
+            "of total runtime (default: 0.5). Yellow = >threshold/2, Red = >threshold" ) )
+    parser.add_argument( "--slow-ratio", type=float, default=10.0, help=(
             "Flag syscalls as outliers if their slowest call exceeds average * ratio "
-            "(default: 10.0). Yellow = >avg*(ratio/2), Red = >avg*ratio"
-        )
-    )
-
-    parser.add_argument(
-        "--error-threshold", type=int, default=50,
-        help="Highlight error types with this many or more occurrences (default: 50)"
-    )
-
-    parser.add_argument(
-        "-d", "--debug", action="store_true",
-        help="Enable debug mode (internal diagnostic prints)"
-    )
-
+            "(default: 10.0). Yellow = >avg*(ratio/2), Red = >avg*ratio" ) )
+    parser.add_argument( "--error-threshold", type=int, default=50, help="Highlight error types with this many or more occurrences (default: 50)" )
+    parser.add_argument( "-e", "--extended", action="store_true", help="Show extended analysis (categories, percentiles, inter-call gaps)" )
+    parser.add_argument( "-v", "--verbose", action="store_true", help="Show extra details (e.g. avg time, call counts) in diagnostics" )
+    parser.add_argument( "-d", "--debug", action="store_true", help="Enable debug mode (internal diagnostic prints)" )
     args = parser.parse_args()
 
     counter, total_time, durations, slow_calls, errors, inter_call_times = analyze_strace_file(args.file)
@@ -420,15 +391,20 @@ def main():
         debug=args.debug
     )
 
-    if args.verbose:
-        print_extended_diagnostics(
-            counter,
-            total_time,
-            durations,
-            inter_call_times=inter_call_times,
-            verbose=args.verbose
-        )
+    print_extended_diagnostics(
+        counter,
+        total_time,
+        durations,
+        verbose=args.verbose,
+        debug=args.debug
+    )
 
+    if args.extended:
+        print_duration_percentiles(
+            inter_call_times=inter_call_times,
+            verbose=args.verbose,
+            debug=args.debug
+        )
 
 if __name__ == "__main__":
     main()
