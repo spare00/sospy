@@ -31,21 +31,33 @@ def parse_strace_line(line):
         'duration': float(match.group('duration')) if match.group('duration') else None
     }
 
-def compute_inter_call_gaps(inter_call_times, top_n=10):
+def compute_inter_call_gaps(inter_call_times, top_n=10, tolerance=0.005):
     gaps = []
     prev_time = None
+    prev_line = None
+
+    # Regex to extract duration from a syscall line
+    duration_pattern = re.compile(r'<([\d\.]+)>$')
 
     for timestamp, syscall, line in inter_call_times:
-        current = datetime.strptime(timestamp, "%H:%M:%S.%f")
+        current_time = datetime.strptime(timestamp, "%H:%M:%S.%f")
         if prev_time:
-            delta = (current - prev_time).total_seconds()
-            gaps.append((delta, prev_line, line))
-        prev_time = current
+            gap = (current_time - prev_time).total_seconds()
+
+            # Try to extract the syscall duration from the previous line
+            dur_match = duration_pattern.search(prev_line)
+            dur = float(dur_match.group(1)) if dur_match else 0.0
+
+            confirmed_blocking = abs(gap - dur) < tolerance and dur > 0.05
+            gaps.append((gap, dur, confirmed_blocking, prev_line, line.strip()))
+
+        prev_time = current_time
         prev_line = line
 
     return sorted(gaps, reverse=True)[:top_n]
 
-def analyze_strace_file(filename):
+def analyze_strace_file(filename, mask=None):
+    mask = set(mask or [])
     inter_call_times = []
 
     # Number of calls for each syscall
@@ -61,7 +73,7 @@ def analyze_strace_file(filename):
     with open(filename, 'r', encoding='utf-8') as f:
         for line in f:
             parsed = parse_strace_line(line)
-            if not parsed:
+            if not parsed or parsed['syscall'] in mask:
                 continue
             syscall = parsed['syscall']
             syscall_counter[syscall] += 1
@@ -314,17 +326,26 @@ def print_extended_diagnostics(counter, total_time, durations, verbose=False, de
 def print_duration_percentiles(inter_call_times, verbose=False, debug=False):
     top_gaps = compute_inter_call_gaps(inter_call_times)
     print("\n⏱️ Top Inter-Call Gaps (idle periods):")
-    for delta, before, after in top_gaps:
-        print(f"\n  🔹 Gap: {delta:.6f}s")
+    for gap, dur, blocking, before, after in top_gaps:
+        marker = " ⛔ (confirmed blocking)" if blocking else "" 
+        print(f"\n  🔹 Gap: {gap:.6f}s{marker}")
         print(f"     Before: {before}")
         print(f"     After : {after}")
 
-    print("\nThis reflects application-level stalls, such as:")
-    print("    • Waiting for a child process to finish")
-    print("    • Waiting for user input")
-    print("    • Busy loops without syscalls")
-    print("    • Context switches or scheduler delays")
-    print("    • External I/O events (e.g., reading from a pipe/socket that blocks)")
+    if verbose:
+        print("\nThis reflects application-level stalls, such as:")
+        print("    • Waiting for a child process to finish")
+        print("    • Waiting for user input")
+        print("    • Busy loops without syscalls")
+        print("    • Context switches or scheduler delays")
+        print("    • External I/O events (e.g., reading from a pipe/socket that blocks)")
+
+        print("\n⛔  Confirmed Blocking:")
+        print("    • A syscall is marked as confirmed blocking when:")
+        print("        - Its duration closely matches the time gap before the next syscall")
+        print("        - And the duration is significant (e.g. > 50ms)")
+        print("    • This indicates the process was completely stalled during that syscall.")
+        print("    • Often caused by blocking syscalls like wait4(), read(), poll(), etc.")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -341,6 +362,7 @@ def main():
 
     parser.add_argument( "file", help="Path to strace output file (use strace -T to include syscall durations)" )
     parser.add_argument( "-t", "--top", type=int, default=10, help="Number of top syscalls to show in each summary section (default: 10)" )
+    parser.add_argument( "-m", "--mask-syscalls", nargs='+', default=[], help="List of syscall names to exclude from analysis (e.g. -m wait4 clone)")
     parser.add_argument( "--time-dominance", type=float, default=0.5, help=(
             "Flag syscalls as dominant if they account for more than this fraction "
             "of total runtime (default: 0.5). Yellow = >threshold/2, Red = >threshold" ) )
@@ -353,7 +375,7 @@ def main():
     parser.add_argument( "-d", "--debug", action="store_true", help="Enable debug mode (internal diagnostic prints)" )
     args = parser.parse_args()
 
-    counter, total_time, durations, slow_calls, errors, inter_call_times = analyze_strace_file(args.file)
+    counter, total_time, durations, slow_calls, errors, inter_call_times = analyze_strace_file(args.file, mask=args.mask_syscalls)
 
     # 👇 First: analyze
     flagged, total_runtime = find_anomalies(
