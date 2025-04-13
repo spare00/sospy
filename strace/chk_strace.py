@@ -146,9 +146,14 @@ def print_summary(counter, total_time, durations, slow_calls, errors,
         for syscall, t in sorted(total_time.items(), key=lambda x: x[1], reverse=True)[:top_n]:
             avg = t / len(durations[syscall])
             ratio = t / total_runtime if total_runtime else 0
+            times = durations[syscall]
+            avg = sum(times) / len(times)
+            min_dur = min(times)
+            max_dur = max(times)
 
             line = (
-                f"{syscall:<20} total: {t:.6f}s  avg: {avg:.6f}s  calls: {len(durations[syscall])}"
+                f"{syscall:<20} total: {t:.6f}s  avg: {avg:.6f}s  calls: {len(times)}"
+                f"  min: {min_dur:.6f}s  max: {max_dur:.6f}s"
             )
 
             if verbose:
