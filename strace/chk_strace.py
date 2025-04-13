@@ -4,6 +4,7 @@ import argparse
 import re
 from collections import defaultdict, Counter
 from collections import defaultdict
+from datetime import datetime
 
 class Color:
     RED = '\033[91m'
@@ -30,7 +31,22 @@ def parse_strace_line(line):
         'duration': float(match.group('duration')) if match.group('duration') else None
     }
 
+def compute_inter_call_gaps(inter_call_times, top_n=10):
+    gaps = []
+    prev_time = None
+
+    for timestamp, syscall, line in inter_call_times:
+        current = datetime.strptime(timestamp, "%H:%M:%S.%f")
+        if prev_time:
+            delta = (current - prev_time).total_seconds()
+            gaps.append((delta, prev_line, line))
+        prev_time = current
+        prev_line = line
+
+    return sorted(gaps, reverse=True)[:top_n]
+
 def analyze_strace_file(filename):
+    inter_call_times = []
 
     # Number of calls for each syscall
     syscall_counter = Counter()
@@ -59,8 +75,10 @@ def analyze_strace_file(filename):
                 if err_match:
                     err_code = err_match.group(1)
                     errors[err_code] += 1
+            if parsed['timestamp']:
+                inter_call_times.append((parsed['timestamp'], parsed['syscall'], line.strip()))
 
-    return syscall_counter, syscall_time, syscall_durations, slow_calls, errors
+    return syscall_counter, syscall_time, syscall_durations, slow_calls, errors, inter_call_times
 
 def find_anomalies(total_time, durations, errors, time_dominance=0.5,
                    slow_ratio=10.0, error_threshold=50, verbose=False, debug=False):
@@ -265,7 +283,7 @@ def calculate_percentiles(durations, percentile_list=(50, 90, 95, 99)):
             }
     return result
 
-def print_extended_diagnostics(counter, total_time, durations, verbose=False):
+def print_extended_diagnostics(counter, total_time, durations, inter_call_times=None, verbose=False):
     from math import isclose
 
     print("\n🧠 Extended Diagnostics:")
@@ -292,6 +310,21 @@ def print_extended_diagnostics(counter, total_time, durations, verbose=False):
             print(f"  {syscall:<20} {stats_line}")
     else:
         print("\n📈 No syscalls with enough data to calculate percentiles.")
+
+    if inter_call_times:
+        top_gaps = compute_inter_call_gaps(inter_call_times)
+        print("\n⏱️ Top Inter-Call Gaps (idle periods):")
+        for delta, before, after in top_gaps:
+            print(f"\n  🔹 Gap: {delta:.6f}s")
+            print(f"     Before: {before}")
+            print(f"     After : {after}")
+
+    print("\nThis reflects application-level stalls, such as:")
+    print("    • Waiting for a child process to finish")
+    print("    • Waiting for user input")
+    print("    • Busy loops without syscalls")
+    print("    • Context switches or scheduler delays")
+    print("    • External I/O events (e.g., reading from a pipe/socket that blocks)")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -349,7 +382,7 @@ def main():
 
     args = parser.parse_args()
 
-    counter, total_time, durations, slow_calls, errors = analyze_strace_file(args.file)
+    counter, total_time, durations, slow_calls, errors, inter_call_times = analyze_strace_file(args.file)
 
     # 👇 First: analyze
     flagged, total_runtime = find_anomalies(
@@ -392,6 +425,7 @@ def main():
             counter,
             total_time,
             durations,
+            inter_call_times=inter_call_times,
             verbose=args.verbose
         )
 
