@@ -141,7 +141,7 @@ def print_summary(counter, total_time, durations, slow_calls, errors,
     if total_time:
         print(f"\n⏱️  Top {top_n} most time-consuming syscalls:")
         total_runtime = sum(total_time.values())
-        print(f"Total time: {total_runtime:6f}")
+        print(f"Total time: {total_runtime:6f} seconds")
 
         for syscall, t in sorted(total_time.items(), key=lambda x: x[1], reverse=True)[:top_n]:
             avg = t / len(durations[syscall])
@@ -152,8 +152,8 @@ def print_summary(counter, total_time, durations, slow_calls, errors,
             max_dur = max(times)
 
             line = (
-                f"{syscall:<20} total: {t:.6f}s  avg: {avg:.6f}s  calls: {len(times)}"
-                f"  min: {min_dur:.6f}s  max: {max_dur:.6f}s"
+                f"{syscall:<20} total: {t:.6f}  avg: {avg:.6f}  calls: {len(times)}"
+                f"  min: {min_dur:.6f}  max: {max_dur:.6f}"
             )
 
             if verbose:
