@@ -4,7 +4,18 @@ import argparse
 import subprocess
 import sys
 
-def run_command(title, command, verbose=False):
+def trim_output(output, max_len):
+    if not max_len:
+        return output
+    trimmed_lines = []
+    for line in output.splitlines():
+        if len(line) > max_len:
+            trimmed_lines.append(line[:max_len] + " ...")
+        else:
+            trimmed_lines.append(line)
+    return "\n".join(trimmed_lines)
+
+def run_command(title, command, verbose=False, max_line_len=None):
     print(title)
 
     if verbose:
@@ -12,7 +23,8 @@ def run_command(title, command, verbose=False):
 
     try:
         output = subprocess.check_output(command, shell=True, executable='/bin/bash', text=True)
-        print(output, end='')
+        output = trim_output(output, max_line_len)
+        print(output)
         print("")
     except subprocess.CalledProcessError as e:
         print(f"Error executing command: {e}", file=sys.stderr)
@@ -29,6 +41,7 @@ def main():
     parser.add_argument('-d', action='store_true', help='Show threads in D (uninterruptible sleep) state')
     parser.add_argument('-c', action='store_true', help='Show number of threads per application (by command)')
     parser.add_argument('-n', type=int, default=10, help='Number of top entries to display (default: 10)')
+    parser.add_argument('-l', '--max-line-len', type=int, default=140, help='Maximum length of each printed output line')
     parser.add_argument('-v', action='store_true', help='Verbose mode: show the actual command being run')
 
     args = parser.parse_args()
@@ -45,34 +58,34 @@ def main():
             f'(head -n 1 && tail -n +2 | sort -nrk3 | head -n {args.n}) < ps && '
             f'awk \'NR!=1 {{ sum+=$3 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' < ps'
         )
-        run_command("Top CPU consuming processes", cmd, verbose=args.v)
+        run_command("Top CPU consuming processes", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.t:
         cmd = (
             f'(head -n 1 && tail -n +2 | sort -nrk7 | head -n {args.n}) < sos_commands/process/ps_-elfL && '
             f'awk \'NR!=1 {{ sum+=$7 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' < sos_commands/process/ps_-elfL'
         )
-        run_command("Top CPU consuming threads", cmd, verbose=args.v)
+        run_command("Top CPU consuming threads", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.r:
         cmd = (
             f'(head -n 1 && tail -n +2 | awk \'$2 ~/R/\' | sort -k7 -nr | head -n {args.n}) < sos_commands/process/ps_-elfL && '
             f'awk \'NR!=1 && $2~/R/ {{ sum+=$7 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' sos_commands/process/ps_-elfL'
         )
-        run_command("Top CPU-Consuming Threads in Running (R) State", cmd, verbose=args.v)
+        run_command("Top CPU-Consuming Threads in Running (R) State", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.d:
         cmd = (
             f'(head -n 1 && tail -n +2 | awk \'$2 ~/D/\' | sort -k7 -nr | head -n {args.n}) < sos_commands/process/ps_-elfL'
         )
-        run_command("Top CPU-Consuming Threads in Blocked (D) State", cmd, verbose=args.v)
+        run_command("Top CPU-Consuming Threads in Blocked (D) State", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.c:
         cmd = (
             f'awk \'{{for (i=17; i<=NF; i++) printf "%s%s", $i, (i==NF ? "\\n" : OFS)}}\' '
             f'sos_commands/process/ps_-elfL | sort | uniq -c | sort -nrk1 | head -n {args.n}'
         )
-        run_command("Top Applications by Thread Count", cmd, verbose=args.v)
+        run_command("Top Applications by Thread Count", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
 if __name__ == '__main__':
     main()
