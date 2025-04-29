@@ -17,7 +17,7 @@ def parse_oom_log(file_path):
     current_event = None
 
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
             for line in file:
                 # Detect the start of an OOM event
                 if "invoked oom-killer" in line:
