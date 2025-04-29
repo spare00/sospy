@@ -6,10 +6,10 @@ import argparse
 
 from config import patterns, mem_info_pattern, oom_pattern
 
-def parse_log_file(filename):
+def parse_log_file(file_path):
     """Reads the log file and returns its contents as a string."""
     try:
-        with open(filename, 'r') as file:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
             return file.read()
     except FileNotFoundError:
         print(f"Error: File '{filename}' not found.")
