@@ -14,11 +14,15 @@ PROC_INTERRUPTS = "proc/interrupts"
 
 def get_mtu(interface):
     try:
-        mtu_path = os.path.join(SYS_CLASS_NET, interface, "mtu")
-        with open(mtu_path) as f:
-            return int(f.read().strip())
+        nmcli_path = f"sos_commands/networkmanager/nmcli_dev_show_{interface}"
+        with open(nmcli_path) as f:
+            for line in f:
+                if "GENERAL.MTU:" in line:
+                    return int(line.strip().split()[-1])
     except Exception:
-        return 1500  # fallback if not found
+        pass
+    print("fallback to 1500")
+    return 1500  # fallback default
 
 def get_interrupt_count(interface):
     try:
@@ -44,8 +48,10 @@ def parse_ethtool_file(filepath):
                 tx = int(line.strip().split()[1])
     return iface, rx, rx_jumbo, tx
 
-def calculate_total_memory(nic_info):
+def calculate_total_memory(nic_info, verbose=False):
     total_bytes = 0
+    verbose_lines = []
+
     print(f"{'Interface':<15} {'MTU':<6} {'Queues':<7} {'RX':<5} {'TX':<5} {'BufSize':<8} {'MiB':>8}")
     print("-" * 64)
 
@@ -69,13 +75,29 @@ def calculate_total_memory(nic_info):
         mib = iface_bytes / (1024 ** 2)
         print(f"{iface:<15} {mtu:<6} {queues:<7} {active_rx:<5} {tx:<5} {buffer_size:<8} {mib:>8.2f}")
 
+        if verbose:
+            formula = (f"{iface}: ({active_rx} + {tx}) * {queues} * {buffer_size} = "
+                       f"{buffer_count} * {buffer_size} = {iface_bytes} bytes "
+                       f"({mib:.2f} MiB)")
+            verbose_lines.append(formula)
+
     total_mib = total_bytes / (1024 ** 2)
     print("-" * 64)
     print(f"{'Total':<53} {total_mib:>8.2f} MiB")
 
+    if verbose and verbose_lines:
+        print("\nVerbose calculations:")
+        for line in verbose_lines:
+            print(line)
+
 def main():
     parser = argparse.ArgumentParser(
         description="Estimate NIC ring buffer memory usage from sosreport data"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show detailed memory calculation formulas"
     )
     parser.add_argument(
         "-f", "--filter",
@@ -102,7 +124,8 @@ def main():
         print(f"No matching interfaces for filter: '{filter_pattern}'")
         exit(1)
 
-    calculate_total_memory(nic_info)
+    calculate_total_memory(nic_info, verbose=args.verbose)
 
 if __name__ == "__main__":
     main()
+
