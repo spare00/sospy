@@ -58,7 +58,7 @@ def format_slab_data(slab_data, total_memory_mib):
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze and display slab memory usage.")
-    parser.add_argument("file", nargs="?", default="/proc/slabinfo", help="Path to the slabinfo file (default: /proc/slabinfo).")
+    parser.add_argument("file", nargs="?", default="proc/slabinfo", help="Path to the slabinfo file (default: /proc/slabinfo).")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-a", "--all", action="store_true", help="Show all slabs.")
     group.add_argument("-l", "--top", type=int, nargs="?", const=DEFAULT_TOP_N,
