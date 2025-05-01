@@ -4,129 +4,118 @@ import sys
 import os
 import argparse
 
-# Default path to meminfo
-DEFAULT_MEMINFO = "proc/meminfo"
+DEFAULT_MEMINFO = "/proc/meminfo"
 
-# Create an argument parser
-parser = argparse.ArgumentParser(
-    description="Calculate unaccounted memory from proc/meminfo or a custom file."
-)
-parser.add_argument(
-    "filename",
-    nargs="?",
-    default=None,
-    help="Path to the meminfo file (default: /proc/meminfo)"
-)
-parser.add_argument(
-    "-v", "--verbose",
-    action="store_true",
-    help="Display verbose output with the memory calculation formula"
-)
+FIELDS = [
+    "MemTotal", "MemFree", "Buffers", "Cached", "SwapCached",
+    "Active(anon)", "Inactive(anon)", "AnonPages",
+    "Unevictable", "Slab", "KernelStack",
+    "PageTables", "Percpu",
+    "HugePages_Total", "Hugepagesize"
+]
 
-# Parse the arguments
-args = parser.parse_args()
+def parse_meminfo(path, verbose=False):
+    if not os.path.isfile(path):
+        print(f"Error: File not found: {path}")
+        sys.exit(1)
 
-# If no filename is provided, print the help message and exit
-if not args.filename:
-    parser.print_help()
-    sys.exit(0)
+    meminfo = {}
+    with open(path, 'r') as f:
+        for line in f:
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            key = parts[0].rstrip(':')
+            if key in FIELDS:
+                try:
+                    meminfo[key] = int(parts[1])
+                except ValueError:
+                    if verbose:
+                        print(f"Skipping line due to non-integer value: {line.strip()}")
+    return meminfo
 
-# Use the provided filename or the default
-filename = args.filename or DEFAULT_MEMINFO
-
-# Check if the file exists
-if not os.path.isfile(filename):
-    print(f"File not found: {filename}")
+def compute_anonpages(meminfo):
+    if "AnonPages" in meminfo:
+        return True  # show_anonpages = True
+    if "Active(anon)" in meminfo and "Inactive(anon)" in meminfo:
+        meminfo["AnonPages"] = meminfo["Active(anon)"] + meminfo["Inactive(anon)"]
+        return False  # show_anonpages = False
+    print("Error: AnonPages is not available and cannot be calculated.")
     sys.exit(1)
 
-# List of memory fields to look for
-fields = ["MemTotal", "MemFree", "Buffers", "Cached", "SwapCached", 
-          "Active(anon)", "Inactive(anon)", "AnonPages", 
-          "Unevictable", "Slab", "KernelStack",
-          "PageTables", "Percpu", 
-          "HugePages_Total", "Hugepagesize"]
-
-meminfo = {}
-
-# Read and parse the meminfo file
-with open(filename, 'r') as f:
-    for line in f:
-        parts = line.split()
-        if len(parts) < 2:  # Skip lines that don't have at least a key and a value
-            continue
-        key = parts[0].rstrip(':')
-        if key in fields:
-            try:
-                meminfo[key] = int(parts[1])
-            except ValueError:
-                if args.verbose:
-                    print(f"Skipping line due to non-integer value: {line.strip()}")
-
-# Calculate HugePages memory
-if "HugePages_Total" in meminfo and "Hugepagesize" in meminfo:
-    meminfo["HugePages"] = meminfo["HugePages_Total"] * meminfo["Hugepagesize"]
-    fields.append("HugePages")  # Add HugePages to the fields list to be displayed
-else:
+def compute_hugepages(meminfo):
+    if "HugePages_Total" in meminfo and "Hugepagesize" in meminfo:
+        meminfo["HugePages"] = meminfo["HugePages_Total"] * meminfo["Hugepagesize"]
+        return
     print("Error: Required HugePages_Total or Hugepagesize not found.")
     sys.exit(1)
 
-# Determine how to handle AnonPages
-if "AnonPages" not in meminfo:
-    if "Active(anon)" in meminfo and "Inactive(anon)" in meminfo:
-        # Calculate AnonPages as the sum of Active(anon) and Inactive(anon)
-        meminfo["AnonPages"] = meminfo["Active(anon)"] + meminfo["Inactive(anon)"]
-        show_anonpages = False  # Do not show AnonPages, show Active(anon) and Inactive(anon) instead
-    else:
-        print("Error: AnonPages is not available and cannot be calculated from Active(anon) and Inactive(anon).")
+def calculate_unaccounted(meminfo, show_anonpages):
+    total = meminfo.get("MemTotal")
+    if total is None:
+        print("Error: MemTotal not found.")
         sys.exit(1)
-else:
-    # AnonPages is present, so we won't show Active(anon) and Inactive(anon)
-    show_anonpages = True
 
-# Check if MemTotal is in the parsed data
-if "MemTotal" not in meminfo:
-    print("Error: MemTotal not found")
-    sys.exit(1)
+    accounted = []
+    for field in FIELDS:
+        if field == "MemTotal":
+            continue
+        if field == "AnonPages" and not show_anonpages:
+            continue
+        if field in ("Active(anon)", "Inactive(anon)") and show_anonpages:
+            continue
+        if field in ("HugePages_Total", "Hugepagesize"):
+            continue
+        if field in meminfo:
+            accounted.append(field)
+    if "HugePages" in meminfo:
+        accounted.append("HugePages")
 
-# Calculate total used memory and unaccounted memory
-total_memory = meminfo["MemTotal"]
-accounted_memory_fields = [field for field in fields if field in meminfo and field != "MemTotal"]
+    accounted_sum = sum(meminfo[field] for field in accounted)
+    return total, accounted_sum, total - accounted_sum, accounted
 
-# Adjust fields to show based on whether AnonPages or Active(anon) + Inactive(anon) is used
-if not show_anonpages:
-    accounted_memory_fields.remove("AnonPages")
-else:
-    accounted_memory_fields.remove("Active(anon)")
-    accounted_memory_fields.remove("Inactive(anon)")
+def print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, verbose, show_anonpages):
+    if verbose:
+        formula = " + ".join(f"{field}={meminfo[field]}" for field in accounted_fields)
+        print("Formula used for calculation:")
+        print(f"  Unaccounted Memory = MemTotal - ({formula})")
+        print(f"  Unaccounted Memory = {total} - {accounted_sum}\n")
 
-# Remove HugePages_Total and Hugepagesize from accounted_memory_fields
-if "HugePages_Total" in accounted_memory_fields:
-    accounted_memory_fields.remove("HugePages_Total")
-if "Hugepagesize" in accounted_memory_fields:
-    accounted_memory_fields.remove("Hugepagesize")
-
-accounted_memory = sum(meminfo[field] for field in accounted_memory_fields)
-unaccounted_memory = total_memory - accounted_memory
-
-# Print the formula and values if verbose mode is enabled
-if args.verbose:
-    # Create a list of field values for detailed formula
-    detailed_values = [f"{field}={meminfo[field]}" for field in accounted_memory_fields]
-    formula = f"Unaccounted Memory = MemTotal - ({' + '.join(detailed_values)})"
-    print("Formula used for calculation:")
-    print(f"  {formula}")
-    print(f"  Unaccounted Memory = {total_memory} - ({' + '.join(str(meminfo[field]) for field in accounted_memory_fields)})\n")
-
-# Print the memory information with proper alignment and enhanced formatting
-header = f"{'Field':<15} {'Size (kB)':>15}   "
-print(header)
-print("=" * len(header))
-print(f"{'MemTotal:':<15} {total_memory:>15,} kB")
-
-for key in fields:
-    if key in accounted_memory_fields:
+    header = f"{'Field':<15} {'Size (kB)':>15}   "
+    print(header)
+    print("=" * len(header))
+    print(f"{'MemTotal:':<15} {total:>15,} kB")
+    for key in accounted_fields:
         print(f"{key:<15} {meminfo[key]:>15,} kB")
+    print("=" * len(header))
+    print(f"{'Unaccounted:':<15} {unaccounted:>15,} kB ({unaccounted / (1024 * 1024):.2f} GB)\n")
 
-# Print the unaccounted memory with a separator
-print("=" * len(header))
-print(f"{'Unaccounted:':<15} {unaccounted_memory:>15,} kB ({unaccounted_memory / (1024 * 1024):.2f} GB)\n")
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Calculate unaccounted memory from /proc/meminfo or a custom file."
+    )
+    parser.add_argument(
+        "filename",
+        nargs="?",
+        default=DEFAULT_MEMINFO,
+        help="Path to the meminfo file (default: /proc/meminfo)"
+    )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Display verbose output with the memory calculation formula"
+    )
+    return parser.parse_args()
+
+def main():
+    args = parse_args()
+    meminfo = parse_meminfo(args.filename, args.verbose)
+    show_anonpages = compute_anonpages(meminfo)
+    compute_hugepages(meminfo)
+    total, accounted_sum, unaccounted, accounted_fields = calculate_unaccounted(meminfo, show_anonpages)
+    print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, args.verbose, show_anonpages)
+
+
+if __name__ == "__main__":
+    main()
+
