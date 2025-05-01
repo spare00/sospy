@@ -4,7 +4,7 @@ import sys
 import os
 import argparse
 
-DEFAULT_MEMINFO = "/proc/meminfo"
+DEFAULT_MEMINFO = "proc/meminfo"
 
 FIELDS = [
     "MemTotal", "MemFree", "Buffers", "Cached", "SwapCached",
@@ -92,13 +92,13 @@ def print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, v
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Calculate unaccounted memory from /proc/meminfo or a custom file."
+        description="Calculate unaccounted memory from proc/meminfo or a custom file."
     )
     parser.add_argument(
         "filename",
         nargs="?",
         default=DEFAULT_MEMINFO,
-        help="Path to the meminfo file (default: /proc/meminfo)"
+        help="Path to the meminfo file (default: proc/meminfo)"
     )
     parser.add_argument(
         "-v", "--verbose",
