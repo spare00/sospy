@@ -122,12 +122,12 @@ def main():
     parser.add_argument(
         "-u", "--user",
         action="store_true",
-        help="Show CPU usage per user, sorted by total %CPU."
+        help="Show CPU usage per user, sorted by total %%CPU."
     )
     parser.add_argument(
         "-c", "--command",
         action="store_true",
-        help="Show CPU usage per command, sorted by total %CPU. Displays only the top 10 commands."
+        help="Show CPU usage per command, sorted by total %%CPU. Displays only the top 10 commands."
     )
     parser.add_argument(
         "--sort",
