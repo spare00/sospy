@@ -12,7 +12,7 @@ SOS_ETHTOOL_PATH = "sos_commands/networking/ethtool_-g_*"
 SYS_CLASS_NET = "sys/class/net"
 PROC_INTERRUPTS = "proc/interrupts"
 
-def get_mtu(interface):
+def get_mtu(interface, verbose=False):
     try:
         nmcli_path = f"sos_commands/networkmanager/nmcli_dev_show_{interface}"
         with open(nmcli_path) as f:
@@ -21,7 +21,9 @@ def get_mtu(interface):
                     return int(line.strip().split()[-1])
     except Exception:
         pass
-    print("fallback to 1500")
+    if verbose:
+        print("fallback to 1500")
+
     return 1500  # fallback default
 
 def get_interrupt_count(interface):
@@ -56,7 +58,7 @@ def calculate_total_memory(nic_info, verbose=False):
     print("-" * 64)
 
     for iface, (rx, rx_jumbo, tx) in nic_info.items():
-        mtu = get_mtu(iface)
+        mtu = get_mtu(iface, verbose)
         queues = get_interrupt_count(iface)
         if queues == 0:
             continue
