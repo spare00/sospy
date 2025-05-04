@@ -35,13 +35,13 @@ def main():
         description='Display top CPU-consuming processes/threads or filtered thread states.'
     )
     parser.add_argument('-a', action='store_true', help='Show all reports (-s -p -t -r -d -c)')
-    parser.add_argument('-s', action='store_true', help='Show top CPU-consuming processes(sum up) from ps -elfL')
-    parser.add_argument('-p', action='store_true', help='Show top CPU-consuming processes from ps')
-    parser.add_argument('-t', action='store_true', help='Show top CPU-consuming threads from ps -elfL')
+    parser.add_argument('-s', action='store_true', help='Show top CPU-consuming processes(Aggregated by Thread Group)')
+    parser.add_argument('-p', action='store_true', help='Show top CPU-consuming processes')
+    parser.add_argument('-t', action='store_true', help='Show top CPU-consuming threads')
     parser.add_argument('-r', action='store_true', help='Show threads in R (running) state')
     parser.add_argument('-d', action='store_true', help='Show threads in D (uninterruptible sleep) state')
     parser.add_argument('-c', type=int, choices=[1, 2], metavar='MODE',
-        help='Show number of threads per application by command (1 = base executable only, 2 = full command + args)'
+        help='Show top commands by thread count (1 = base executable only, 2 = full command + args)'
     )
     parser.add_argument('-n', type=int, default=10, help='Number of top entries to display (default: 10)')
     parser.add_argument('-l', '--max-line-len', type=int, default=140, help='Maximum length of each printed output line')
@@ -58,9 +58,9 @@ def main():
 
     if args.s:
         cmd = (
-            f"printf \"%6s %6s %5s %s\\n\" \"PID\" \"%CPU\" \"NLWP\" \"CMD\"; "
+            f"printf \"%10s %6s %5s %s\\n\" \"PID\" \"%CPU\" \"NLWP\" \"CMD\"; "
             f"awk 'NR > 1 {{ cpu[$4] += $7; cmd[$4] = $17; nlwp[$4] = $8 }} "
-            f"END {{ for (pid in cpu) printf \"%6s %6.2f %5d %s\\n\", pid, cpu[pid], nlwp[pid], cmd[pid] }}' "
+            f"END {{ for (pid in cpu) printf \"%10s %6d %5d %s\\n\", pid, cpu[pid], nlwp[pid], cmd[pid] }}' "
             f"sos_commands/process/ps_-elfL | sort -nrk2 | head -n {args.n}"
         )
         run_command("Top CPU-Consuming Processes (Aggregated by Thread Group)", cmd, verbose=args.v, max_line_len=args.max_line_len)
@@ -70,14 +70,14 @@ def main():
             f'(head -n 1 && tail -n +1 | sort -nrk3 | head -n {args.n}) < ps && '
             f'awk \'NR!=1 {{ sum+=$3 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' < ps'
         )
-        run_command("Top CPU consuming processes", cmd, verbose=args.v, max_line_len=args.max_line_len)
+        run_command("Top CPU-Consuming Processes", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.t:
         cmd = (
             f'(head -n 1 && tail -n +1 | sort -nrk7 | head -n {args.n}) < sos_commands/process/ps_-elfL && '
             f'awk \'NR!=1 {{ sum+=$7 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' < sos_commands/process/ps_-elfL'
         )
-        run_command("Top CPU consuming threads", cmd, verbose=args.v, max_line_len=args.max_line_len)
+        run_command("Top CPU-Consuming Threads", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.r:
         cmd = (
