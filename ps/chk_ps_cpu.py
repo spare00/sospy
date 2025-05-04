@@ -34,7 +34,8 @@ def main():
     parser = argparse.ArgumentParser(
         description='Display top CPU-consuming processes/threads or filtered thread states.'
     )
-    parser.add_argument('-a', action='store_true', help='Show all reports (-p -t -r -d -c)')
+    parser.add_argument('-a', action='store_true', help='Show all reports (-s -p -t -r -d -c)')
+    parser.add_argument('-s', action='store_true', help='Show top CPU-consuming processes(sum up) from ps -elfL')
     parser.add_argument('-p', action='store_true', help='Show top CPU-consuming processes from ps')
     parser.add_argument('-t', action='store_true', help='Show top CPU-consuming threads from ps -elfL')
     parser.add_argument('-r', action='store_true', help='Show threads in R (running) state')
@@ -51,7 +52,16 @@ def main():
         return
 
     if args.a:
-        args.p = args.t = args.r = args.d = args.c = True
+        args.s = args.p = args.t = args.r = args.d = args.c = True
+
+    if args.s:
+        cmd = (
+            f"printf \"%6s %6s %5s %s\\n\" \"PID\" \"%CPU\" \"NLWP\" \"CMD\"; "
+            f"awk 'NR > 1 {{ cpu[$4] += $7; cmd[$4] = $17; nlwp[$4] = $8 }} "
+            f"END {{ for (pid in cpu) printf \"%6s %6.2f %5d %s\\n\", pid, cpu[pid], nlwp[pid], cmd[pid] }}' "
+            f"sos_commands/process/ps_-elfL | sort -nrk2 | head -n {args.n}"
+        )
+        run_command("Top CPU-Consuming Processes (Aggregated by Thread Group)", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.p:
         cmd = (
