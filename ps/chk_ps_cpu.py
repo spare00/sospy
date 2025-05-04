@@ -55,28 +55,28 @@ def main():
 
     if args.p:
         cmd = (
-            f'(head -n 1 && tail -n +2 | sort -nrk3 | head -n {args.n}) < ps && '
+            f'(head -n 1 && tail -n +1 | sort -nrk3 | head -n {args.n}) < ps && '
             f'awk \'NR!=1 {{ sum+=$3 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' < ps'
         )
         run_command("Top CPU consuming processes", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.t:
         cmd = (
-            f'(head -n 1 && tail -n +2 | sort -nrk7 | head -n {args.n}) < sos_commands/process/ps_-elfL && '
+            f'(head -n 1 && tail -n +1 | sort -nrk7 | head -n {args.n}) < sos_commands/process/ps_-elfL && '
             f'awk \'NR!=1 {{ sum+=$7 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' < sos_commands/process/ps_-elfL'
         )
         run_command("Top CPU consuming threads", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.r:
         cmd = (
-            f'(head -n 1 && tail -n +2 | awk \'$2 ~/R/\' | sort -k7 -nr | head -n {args.n}) < sos_commands/process/ps_-elfL && '
+            f'(head -n 1 && tail -n +1 | awk \'$2 ~/R/\' | sort -k7 -nr | head -n {args.n}) < sos_commands/process/ps_-elfL && '
             f'awk \'NR!=1 && $2~/R/ {{ sum+=$7 }} END {{ printf "------------------------\\nTotal CPU usage: %% %.1f\\n", sum }}\' sos_commands/process/ps_-elfL'
         )
         run_command("Top CPU-Consuming Threads in Running (R) State", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
     if args.d:
         cmd = (
-            f'(head -n 1 && tail -n +2 | awk \'$2 ~/D/\' | sort -k7 -nr | head -n {args.n}) < sos_commands/process/ps_-elfL'
+            f'(head -n 1 && tail -n +1 | awk \'$2 ~/D/\' | sort -k7 -nr | head -n {args.n}) < sos_commands/process/ps_-elfL'
         )
         run_command("Top CPU-Consuming Threads in Blocked (D) State", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
