@@ -40,14 +40,16 @@ def main():
     parser.add_argument('-t', action='store_true', help='Show top CPU-consuming threads from ps -elfL')
     parser.add_argument('-r', action='store_true', help='Show threads in R (running) state')
     parser.add_argument('-d', action='store_true', help='Show threads in D (uninterruptible sleep) state')
-    parser.add_argument('-c', action='store_true', help='Show number of threads per application (by command)')
+    parser.add_argument('-c', type=int, choices=[1, 2], metavar='MODE',
+        help='Show number of threads per application by command (1 = base executable only, 2 = full command + args)'
+    )
     parser.add_argument('-n', type=int, default=10, help='Number of top entries to display (default: 10)')
     parser.add_argument('-l', '--max-line-len', type=int, default=140, help='Maximum length of each printed output line')
     parser.add_argument('-v', action='store_true', help='Verbose mode: show the actual command being run')
 
     args = parser.parse_args()
 
-    if not (args.a or args.p or args.t or args.r or args.d):
+    if not (args.a or args.s or args.p or args.t or args.r or args.d or args.c):
         parser.print_help()
         return
 
@@ -90,12 +92,25 @@ def main():
         )
         run_command("Top CPU-Consuming Threads in Blocked (D) State", cmd, verbose=args.v, max_line_len=args.max_line_len)
 
-    if args.c:
-        cmd = (
-            f'awk \'{{for (i=17; i<=NF; i++) printf "%s%s", $i, (i==NF ? "\\n" : OFS)}}\' '
-            f'sos_commands/process/ps_-elfL | sort | uniq -c | sort -nrk1 | head -n {args.n}'
-        )
-        run_command("Top Applications by Thread Count", cmd, verbose=args.v, max_line_len=args.max_line_len)
+    if args.c is not None:
+        if args.c == 2:
+
+            # Full command + args
+            cmd = (
+                f"printf \"%6s %s\\n\" \"CNT\" \"CMD\"; "
+                f"awk '{{for (i=17; i<=NF; i++) printf \"%s%s\", $i, (i==NF ? \"\\n\" : OFS)}}' "
+                f"sos_commands/process/ps_-elfL | sort | uniq -c | sort -nrk1 | head -n {args.n}"
+            )
+            title = "Top Commands by Thread Count (Grouped by Full Command Line)"
+        else:
+            # Base executable only
+            cmd = (
+                f"printf \"%6s %s\\n\" \"CNT\" \"CMD\"; "
+                f"awk 'NF > 0 {{print $17}}' sos_commands/process/ps_-elfL | sort | uniq -c | sort -nrk1 | head -n {args.n}"
+            )
+            title = "Top Commands by Thread Count (Grouped by Base Executable)"
+
+        run_command(title, cmd, verbose=args.v, max_line_len=args.max_line_len)
 
 if __name__ == '__main__':
     main()
