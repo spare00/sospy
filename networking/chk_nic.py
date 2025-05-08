@@ -42,6 +42,42 @@ def get_interrupt_count(interface):
     except Exception:
         return 0
 
+def print_nic_memory_table(nic_data, verbose=False, unit="M"):
+    unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}
+    label = unit_label.get(unit.upper(), "MiB")
+
+    header_fmt = "{:<15} {:>5} {:>7} {:>7} {:>7} {:>14} {:>10}"
+    row_fmt =    "{:<15} {:>5} {:>7} {:>7} {:>7} {:>14,} {:>10.2f}"
+
+    print(header_fmt.format("Interface", "MTU", "Queues", "RX", "TX", "BufSize(KiB)", label))
+    print("-" * 80)
+
+    total_kb = 0
+    verbose_lines = []
+
+    for iface, mtu, queues, rx, tx, buffer_size in nic_data:
+        buffer_count = (rx + tx) * queues
+        iface_kb = buffer_count * buffer_size
+        total_kb += iface_kb
+        converted = scale_value(iface_kb, unit)
+
+        print(row_fmt.format(iface, mtu, queues, rx, tx, buffer_size, converted))
+
+        if verbose:
+            formula = (f"{iface}: ({rx} + {tx}) * {queues} * {buffer_size} KiB = "
+                       f"{buffer_count:,} * {buffer_size} = {iface_kb:,} KiB "
+                       f"({converted:.2f} {label})")
+            verbose_lines.append(formula)
+
+    total_converted = scale_value(total_kb, unit)
+    print("-" * 80)
+    print(f"{'Total':<61}{total_converted:>10.2f} {label}")
+
+    if verbose and verbose_lines:
+        print("\nVerbose calculations:")
+        for line in verbose_lines:
+            print(line)
+
 def parse_ethtool_file(filepath):
     iface = os.path.basename(filepath).replace("ethtool_-g_", "")
     rx, rx_jumbo, tx = 0, 0, 0
@@ -58,51 +94,19 @@ def parse_ethtool_file(filepath):
     return iface, rx, rx_jumbo, tx
 
 def calculate_total_memory(nic_info, verbose=False, unit="M"):
-    label = unit_label.get(unit.upper(), "MiB")
-
-    total_kb = 0
-    verbose_lines = []
-
-    header_fmt = "{:<15} {:>7} {:>7} {:>7} {:>5} {:>14} {:>10}"
-    row_fmt =    "{:<15} {:>7} {:>7} {:>7} {:>5} {:>14,} {:>10.2f}"
-
-    print(header_fmt.format("Interface", "RX", "TX", "Queues", "MTU", "BufSize(KiB)", label))
-    print("-" * 80)
-
+    nic_data = []
     for iface, (rx, rx_jumbo, tx) in nic_info.items():
         mtu = get_mtu(iface, verbose)
         queues = get_interrupt_count(iface)
         if queues == 0:
             continue
 
-        if mtu > 1500:
-            active_rx = rx_jumbo
-            buffer_size = JUMBO_BUFFER_SIZE
-        else:
-            active_rx = rx
-            buffer_size = STANDARD_BUFFER_SIZE
+        buffer_size = JUMBO_BUFFER_SIZE if mtu > 1500 else STANDARD_BUFFER_SIZE
+        active_rx = rx_jumbo if mtu > 1500 else rx
 
-        buffer_count = (active_rx + tx) * queues
-        iface_kb = buffer_count * buffer_size
-        total_kb += iface_kb
+        nic_data.append((iface, mtu, queues, active_rx, tx, buffer_size))
 
-        converted = scale_value(iface_kb, unit)
-        print(row_fmt.format(iface, active_rx, tx, queues, mtu, buffer_size, converted))
-
-        if verbose:
-            formula = (f"{iface:<15}: ({active_rx} + {tx}) * {queues} * {buffer_size} = "
-                       f"{iface_kb:>8,} KiB "
-                       f"({converted:>8.2f} {label})")
-            verbose_lines.append(formula)
-
-    total_converted = scale_value(total_kb, unit)
-    print("-" * 80)
-    print(f"{'Total':<63}{total_converted:>8.2f} {label}")
-
-    if verbose and verbose_lines:
-        print("\nVerbose calculations:")
-        for line in verbose_lines:
-            print(line)
+    print_nic_memory_table(nic_data, verbose, unit)
 
 def parse_max_ethtool_file(filepath):
     iface = os.path.basename(filepath).replace("ethtool_-g_", "")
@@ -128,51 +132,19 @@ def parse_max_ethtool_file(filepath):
     return iface, max_rx, max_rx_jumbo, max_tx
 
 def calculate_max_memory(nic_info, verbose=False, unit="M"):
-    label = unit_label.get(unit.upper(), "MiB")
-
-    total_kb = 0
-    verbose_lines = []
-
-    header_fmt = "{:<15} {:>7} {:>7} {:>7} {:>5} {:>14} {:>10}"
-    row_fmt =    "{:<15} {:>7} {:>7} {:>7} {:>5} {:>14,} {:>10.2f}"
-
-    print(header_fmt.format("Interface", "RX", "TX", "Queues", "MTU", "BufSize(KiB)", label))
-    print("-" * 80)
-
-    for iface, (max_rx, max_rx_jumbo, max_tx) in nic_info.items():
+    nic_data = []
+    for iface, (rx, rx_jumbo, tx) in nic_info.items():
         mtu = get_mtu(iface, verbose)
         queues = get_interrupt_count(iface)
         if queues == 0:
             continue
 
-        if mtu > 1500:
-            active_rx = max_rx_jumbo
-            buffer_size = JUMBO_BUFFER_SIZE
-        else:
-            active_rx = max_rx
-            buffer_size = STANDARD_BUFFER_SIZE
+        buffer_size = JUMBO_BUFFER_SIZE if mtu > 1500 else STANDARD_BUFFER_SIZE
+        active_rx = rx_jumbo if mtu > 1500 else rx
 
-        buffer_count = (active_rx + max_tx) * queues
-        iface_kb = buffer_count * buffer_size
-        total_kb += iface_kb
+        nic_data.append((iface, mtu, queues, active_rx, tx, buffer_size))
 
-        converted = scale_value(iface_kb, unit)
-        print(row_fmt.format(iface, active_rx, max_tx, queues, mtu, buffer_size, converted))
-
-        if verbose:
-            formula = (f"{iface:<15}: ({active_rx} + {max_tx}) * {queues} * {buffer_size} = "
-                       f"{iface_kb:>8,} KiB "
-                       f"({converted:>8.2f} {label})")
-            verbose_lines.append(formula)
-
-    total_converted = scale_value(total_kb, unit)
-    print("-" * 80)
-    print(f"{'Total':<63}{total_converted:>8.2f} {label}")
-
-    if verbose and verbose_lines:
-        print("\nVerbose calculations:")
-        for line in verbose_lines:
-            print(line)
+    print_nic_memory_table(nic_data, verbose, unit)
 
 def main():
     parser = argparse.ArgumentParser(
