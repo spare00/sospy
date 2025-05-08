@@ -6,11 +6,16 @@ import subprocess
 import glob
 import argparse
 
-STANDARD_BUFFER_SIZE = 2048
-JUMBO_BUFFER_SIZE = 16384
+STANDARD_BUFFER_SIZE = 2  #kB
+JUMBO_BUFFER_SIZE = 16    #kB
 SOS_ETHTOOL_PATH = "sos_commands/networking/ethtool_-g_*"
 SYS_CLASS_NET = "sys/class/net"
 PROC_INTERRUPTS = "proc/interrupts"
+
+def scale_value(kb, unit):
+    if unit == "K": return kb
+    if unit == "M": return kb / 1024
+    if unit == "G": return kb / (1024 * 1024)
 
 def get_mtu(interface, verbose=False):
     try:
@@ -22,7 +27,7 @@ def get_mtu(interface, verbose=False):
     except Exception:
         pass
     if verbose:
-        print("fallback to 1500")
+        print(f"MTU file not found for {interface}, falling back to 1500")
 
     return 1500  # fallback default
 
@@ -30,7 +35,7 @@ def get_interrupt_count(interface):
     try:
         with open(PROC_INTERRUPTS, 'r') as f:
             lines = f.readlines()
-        matches = [line for line in lines if re.search(rf'\b{interface}', line)]
+        matches = [line for line in lines if re.search(rf'\b{re.escape(interface)}\b', line)]
         return len(matches)
     except Exception:
         return 0
@@ -50,12 +55,19 @@ def parse_ethtool_file(filepath):
                 tx = int(line.strip().split()[1])
     return iface, rx, rx_jumbo, tx
 
-def calculate_total_memory(nic_info, verbose=False):
-    total_bytes = 0
+def calculate_total_memory(nic_info, verbose=False, unit="M"):
+
+    unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}
+    label = unit_label.get(unit.upper(), "MiB")
+
+    total_kb = 0
     verbose_lines = []
 
-    print(f"{'Interface':<15} {'MTU':<6} {'Queues':<7} {'RX':<5} {'TX':<5} {'BufSize':<8} {'MiB':>8}")
-    print("-" * 64)
+    header_fmt = "{:<15} {:>7} {:>7} {:>7} {:>5} {:>14} {:>10}"
+    row_fmt =    "{:<15} {:>7} {:>7} {:>7} {:>5} {:>14,} {:>10.2f}"
+
+    print(header_fmt.format("Interface", "RX", "TX", "Queues", "MTU", "BufSize(KiB)", label))
+    print("-" * 80)
 
     for iface, (rx, rx_jumbo, tx) in nic_info.items():
         mtu = get_mtu(iface, verbose)
@@ -71,21 +83,21 @@ def calculate_total_memory(nic_info, verbose=False):
             buffer_size = STANDARD_BUFFER_SIZE
 
         buffer_count = (active_rx + tx) * queues
-        iface_bytes = buffer_count * buffer_size
-        total_bytes += iface_bytes
+        iface_kb = buffer_count * buffer_size
+        total_kb += iface_kb
 
-        mib = iface_bytes / (1024 ** 2)
-        print(f"{iface:<15} {mtu:<6} {queues:<7} {active_rx:<5} {tx:<5} {buffer_size:<8} {mib:>8.2f}")
+        converted = scale_value(iface_kb, unit)
+        print(row_fmt.format(iface, active_rx, tx, queues, mtu, buffer_size, converted))
 
         if verbose:
-            formula = (f"{iface}: ({active_rx} + {tx}) * {queues} * {buffer_size} = "
-                       f"{buffer_count} * {buffer_size} = {iface_bytes} bytes "
-                       f"({mib:.2f} MiB)")
+            formula = (f"{iface:<15}: ({active_rx} + {tx}) * {queues} * {buffer_size} = "
+                       f"{iface_kb:>8,} KiB "
+                       f"({converted:>8.2f} {label})")
             verbose_lines.append(formula)
 
-    total_mib = total_bytes / (1024 ** 2)
-    print("-" * 64)
-    print(f"{'Total':<53} {total_mib:>8.2f} MiB")
+    total_converted = scale_value(total_kb, unit)
+    print("-" * 80)
+    print(f"{'Total':<63}{total_converted:>8.2f} {label}")
 
     if verbose and verbose_lines:
         print("\nVerbose calculations:")
@@ -107,6 +119,12 @@ def main():
         type=str,
         default=""
     )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("-K", action="store_const", const="K", dest="unit", help="Display memory in KiB")
+    group.add_argument("-M", action="store_const", const="M", dest="unit", help="Display memory in MiB (default)")
+    group.add_argument("-G", action="store_const", const="G", dest="unit", help="Display memory in GiB")
+    parser.set_defaults(unit="M")
+
     args = parser.parse_args()
     filter_pattern = args.filter
 
@@ -126,7 +144,7 @@ def main():
         print(f"No matching interfaces for filter: '{filter_pattern}'")
         exit(1)
 
-    calculate_total_memory(nic_info, verbose=args.verbose)
+    calculate_total_memory(nic_info, verbose=args.verbose, unit=args.unit)
 
 if __name__ == "__main__":
     main()
