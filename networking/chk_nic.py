@@ -26,7 +26,7 @@ def _build_mtu_cache():
         return mtu_info
 
     current_iface = None
-    mtu = maxmtu = None
+    current_data = {}
 
     with open(IP_ADDR_DETAIL_PATH, "r") as f:
         for line in f:
@@ -34,40 +34,32 @@ def _build_mtu_cache():
             if not line:
                 continue
 
-            # Detect new interface block
-            iface_match = re.match(r"\d+:\s+([^:@\s]+)", line)
+            # Match the interface line: e.g. "8: eno12419np2: <...> mtu 1500 ..."
+            iface_match = re.match(r"\d+:\s+([^:@\s]+):.*\bmtu\s+(\d+)", line)
             if iface_match:
-                # Commit previous interface data
-                if current_iface and (mtu or maxmtu):
-                    mtu_info[current_iface] = {}
-                    if mtu:
-                        mtu_info[current_iface]["mtu"] = mtu
-                    if maxmtu:
-                        mtu_info[current_iface]["maxmtu"] = maxmtu
-                # Reset for new block
+                # Save the previous interface's data
+                if current_iface and current_data:
+                    mtu_info[current_iface] = current_data
+
                 current_iface = iface_match.group(1)
-                mtu = maxmtu = None
+                mtu_value = int(iface_match.group(2))
+                current_data = {"mtu": mtu_value}
                 continue
 
-            if "mtu" in line:
+            # Match lines that contain "maxmtu"
+            if "maxmtu" in line and current_iface:
                 tokens = line.split()
                 try:
-                    if "mtu" in tokens:
-                        mtu_idx = tokens.index("mtu")
-                        mtu = int(tokens[mtu_idx + 1])
                     if "maxmtu" in tokens:
                         maxmtu_idx = tokens.index("maxmtu")
                         maxmtu = int(tokens[maxmtu_idx + 1])
+                        current_data["maxmtu"] = maxmtu
                 except (ValueError, IndexError):
                     continue
 
-    # Commit the last interface
-    if current_iface and (mtu or maxmtu):
-        mtu_info[current_iface] = {}
-        if mtu:
-            mtu_info[current_iface]["mtu"] = mtu
-        if maxmtu:
-            mtu_info[current_iface]["maxmtu"] = maxmtu
+    # Save the last one
+    if current_iface and current_data:
+        mtu_info[current_iface] = current_data
 
     return mtu_info
 
