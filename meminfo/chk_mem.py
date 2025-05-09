@@ -105,6 +105,13 @@ def parse_args():
         action="store_true",
         help="Display verbose output with the memory calculation formula"
     )
+    parser.add_argument(
+        "-u", "--unaccounted",
+        dest="unaccounted",
+        action="store_true",
+        default=True,
+        help="Include unaccounted memory calculation (default: enabled)"
+    )
     return parser.parse_args()
 
 def main():
@@ -112,9 +119,10 @@ def main():
     meminfo = parse_meminfo(args.filename, args.verbose)
     show_anonpages = compute_anonpages(meminfo)
     compute_hugepages(meminfo)
-    total, accounted_sum, unaccounted, accounted_fields = calculate_unaccounted(meminfo, show_anonpages)
-    print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, args.verbose, show_anonpages)
 
+    if args.unaccounted:
+        total, accounted_sum, unaccounted, accounted_fields = calculate_unaccounted(meminfo, show_anonpages)
+        print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, args.verbose, show_anonpages)
 
 if __name__ == "__main__":
     main()
