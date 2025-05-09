@@ -19,7 +19,7 @@ def scale_value(kb, unit):
     if unit == "M": return kb / 1024
     if unit == "G": return kb / (1024 * 1024)
 
-def parse_meminfo(path, verbose=False, unit="M"):
+def parse_meminfo(path, verbose=False):
     if not os.path.isfile(path):
         print(f"Error: File not found: {path}")
         sys.exit(1)
@@ -33,7 +33,7 @@ def parse_meminfo(path, verbose=False, unit="M"):
             key = parts[0].rstrip(':')
             if key in FIELDS:
                 try:
-                    meminfo[key] = scale_value(int(parts[1]), unit)
+                    meminfo[key] = int(parts[1])
                 except ValueError:
                     if verbose:
                         print(f"Skipping line due to non-integer value: {line.strip()}")
@@ -87,19 +87,22 @@ def print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, v
     if verbose:
         # Header line for formula
         formula_fields = " - ".join(accounted_fields)
-        values_line = " - ".join(f"{meminfo[field]:.2f}" for field in accounted_fields)
+        values_line = " - ".join(f"{scale_value(meminfo[field], unit):.2f}" for field in accounted_fields)
         print("Formula used for calculation:")
         print(f"  Unaccounted Memory = MemTotal - {formula_fields}")
-        print(f"  {unaccounted:.2f} = {total:.2f} - {values_line}\n")
+        print(f"  {scale_value(unaccounted, unit):.2f} = {scale_value(total, unit):.2f} - {values_line}\n")
+
+        # Final summary
+        print(f"{'Unaccounted:':<20} {scale_value(unaccounted, unit):>20.2f} ({unit_label})\n")
 
     header = f"{'Field':<20} {'Size (' + unit_label + ')':>20}"
     print(header)
     print("=" * len(header))
-    print(f"{'MemTotal:':<20} {total:>20.2f}")
+    print(f"{'MemTotal:':<20} {scale_value(total, unit):>20.2f}")
     for key in accounted_fields:
-        print(f"{key:<20} {meminfo[key]:>20.2f}")
+        print(f"{key:<20} {scale_value(meminfo[key], unit):>20.2f}")
     print("=" * len(header))
-    print(f"{'Unaccounted:':<20} {unaccounted:>20.2f}\n")
+    print(f"{'Unaccounted:':<20} {scale_value(unaccounted, unit):>20.2f}\n")
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -126,7 +129,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    meminfo = parse_meminfo(args.filename, args.verbose, args.unit)
+    meminfo = parse_meminfo(args.filename, args.verbose)
     show_anonpages = compute_anonpages(meminfo)
     compute_hugepages(meminfo)
 
