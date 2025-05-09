@@ -60,6 +60,8 @@ def calculate_unaccounted(meminfo, show_anonpages):
     for field in FIELDS:
         if field == "MemTotal":
             continue
+        if field in ("Unevictable"):
+            continue
         if field == "AnonPages" and not show_anonpages:
             continue
         if field in ("Active(anon)", "Inactive(anon)") and show_anonpages:
