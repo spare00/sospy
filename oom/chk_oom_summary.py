@@ -6,13 +6,13 @@ import argparse
 
 from config import patterns, mem_info_pattern, oom_pattern
 
-def scale_value(value, from_unit="pages", to_unit="M", pagesize_kb=4):
+def scale_value(value, from_unit="P", to_unit="M", pagesize_kb=4):
     """
     Convert a memory value from pages or KB to the desired unit.
-    - from_unit: "pages" or "K"
+    - from_unit: "P" or "K"
     - to_unit: "K", "M", "G"
     """
-    kb = value * pagesize_kb if from_unit == "pages" else value
+    kb = value * pagesize_kb if from_unit == "P" else value
     if to_unit == "K":
         return kb
     elif to_unit == "M":
@@ -181,21 +181,21 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
               " - Free Cma"
               " - Huge pages\n")
 
-        print(f"{scale_value(unaccounted_pages, 'pages', 'M', pagesize_kb):.2f} = "
-              f"{scale_value(total_memory_pages, 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('active_anon', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('inactive_anon', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('isolated_anon', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('pagecache', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('swapcache', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('slab_reclaimable', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('slab_unreclaimable', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('pagetables', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('free', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('reserved', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('bounce', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('free_cma', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(hugepages_total_pages, 'pages', 'M', pagesize_kb):.2f}")
+        print(f"{scale_value(unaccounted_pages, 'P', 'M', pagesize_kb):.2f} = "
+              f"{scale_value(total_memory_pages, 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('active_anon', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('inactive_anon', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('isolated_anon', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('pagecache', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('swapcache', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('slab_reclaimable', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('slab_unreclaimable', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('pagetables', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('free', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('reserved', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('bounce', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('free_cma', 0), 'P', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(hugepages_total_pages, 'P', 'M', pagesize_kb):.2f}")
 
     # Return memory summary, total memory details, etc.
     return memory_summary, total_memory_pages, unaccounted_pages
@@ -204,19 +204,14 @@ def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timesta
                   unit='M', pagesize_kb=4, show_unaccounted=False, verbose=False):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
 
-    unit_label = {
-        'P': 'Pages',
-        'K': 'KiB',
-        'M': 'MB',
-        'G': 'GB'
-    }.get(unit, 'MB')
+    unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'MB')
 
     print(f"\nTimestamp: {timestamp}")
     print(f"{'Category':<25} {unit_label:>15}")
     print("=" * 40)
 
     for key, pages in memory_summary.items():
-        val = scale_value(pages, 'pages', unit, pagesize_kb)
+        val = scale_value(pages, 'P', unit, pagesize_kb)
 
         print(f"{key:<25} {val:>15,.2f}")
 
@@ -224,27 +219,12 @@ def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timesta
     if show_unaccounted:
         print("-" * 40)
         print(f"{'Unaccounted Memory':<25}", end=' ')
-        if unit == 'P':
-            pages = unaccounted_pages
-            print(f"{pages:>15,}")
-        elif unit == 'K':
-            print(f"{scale_value(unaccounted_pages, 'pages', 'K', pagesize_kb):>15,.2f}")
-        elif unit == 'M':
-            print(f"{scale_value(unaccounted_pages, 'pages', 'M', pagesize_kb):>15,.2f}")
-        elif unit == 'G':
-            print(f"{scale_value(unaccounted_pages, 'pages', 'G', pagesize_kb):>15,.2f}")
+        print(f"{scale_value(unaccounted_pages, 'P', unit, pagesize_kb):>15,.2f}")
 
     # Footer
     print("=" * 40)
     print(f"{'Total Memory':<25}", end=' ')
-    if unit == 'P':
-        print(f"{total_memory_pages:>15,}")
-    elif unit == 'K':
-        print(f"{scale_value(total_memory_pages, 'pages', 'K', pagesize_kb):>15,.2f}")
-    elif unit == 'M':
-        print(f"{scale_value(total_memory_pages, 'pages', 'M', pagesize_kb):>15,.2f}")
-    elif unit == 'G':
-        print(f"{scale_value(total_memory_pages, 'pages', 'G', pagesize_kb):>15,.2f}")
+    print(f"{scale_value(total_memory_pages, 'P', unit, pagesize_kb):>15,.2f}")
 
 def main():
     # Use argparse for flexible option parsing
