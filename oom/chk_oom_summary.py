@@ -6,13 +6,29 @@ import argparse
 
 from config import patterns, mem_info_pattern, oom_pattern
 
+def scale_value(value, from_unit="pages", to_unit="M", pagesize_kb=4):
+    """
+    Convert a memory value from pages or KB to the desired unit.
+    - from_unit: "pages" or "K"
+    - to_unit: "K", "M", "G"
+    """
+    kb = value * pagesize_kb if from_unit == "pages" else value
+    if to_unit == "K":
+        return kb
+    elif to_unit == "M":
+        return kb / 1024
+    elif to_unit == "G":
+        return kb / (1024 * 1024)
+    return kb
+
+
 def parse_log_file(file_path):
     """Reads the log file and returns its contents as a string."""
     try:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
             return file.read()
     except FileNotFoundError:
-        print(f"Error: File '{filename}' not found.")
+        print(f"Error: File '{file_path}' not found.")
         sys.exit(1)
 
     return mem_info_list
@@ -80,36 +96,29 @@ def extract_memory_info(log_data):
 
     return mem_info_list
 
-def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, show_full, pagesize_kb=4, verbose=False):
+def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
+                           show_full, unit='M', pagesize_kb=4, verbose=False):
     """Calculate memory usage summary from memory info."""
-    mb_conversion = lambda x: x * pagesize_kb / 1024 if x else 0
-    gb_conversion = lambda x: x * pagesize_kb / 1024 / 1024 if x else 0
 
     total_memory_pages = memory_info.get('total_pages_ram', 0)
-    total_memory_mb = mb_conversion(total_memory_pages)
-    total_memory_gb = gb_conversion(total_memory_pages)
-
     # Convert hugepage memory from KB to MB
     hugepages_total_pages = hugepages_total_kb / pagesize_kb
-    hugepages_total_mb = mb_conversion(hugepages_total_pages)
     hugepages_used_pages = hugepages_used_kb / pagesize_kb
-    hugepages_used_mb = mb_conversion(hugepages_used_pages)
-
     memory_summary = {
-        'Active Anon': (mb_conversion(memory_info['active_anon']), gb_conversion(memory_info['active_anon']), memory_info['active_anon']),
-        'Inactive Anon': (mb_conversion(memory_info['inactive_anon']), gb_conversion(memory_info['inactive_anon']), memory_info['inactive_anon']),
-        'Active File': (mb_conversion(memory_info['active_file']), gb_conversion(memory_info['active_file']), memory_info['active_file']),
-        'Inactive File': (mb_conversion(memory_info['inactive_file']), gb_conversion(memory_info['inactive_file']), memory_info['inactive_file']),
-        'Slab Reclaimable': (mb_conversion(memory_info['slab_reclaimable']), gb_conversion(memory_info['slab_reclaimable']), memory_info['slab_reclaimable']),
-        'Slab Unreclaimable': (mb_conversion(memory_info['slab_unreclaimable']), gb_conversion(memory_info['slab_unreclaimable']), memory_info['slab_unreclaimable']),
-        'Shmem': (mb_conversion(memory_info['shmem']), gb_conversion(memory_info['shmem']), memory_info['shmem']),
-        'Pagetables': (mb_conversion(memory_info['pagetables']), gb_conversion(memory_info['pagetables']), memory_info['pagetables']),
-        'Free': (mb_conversion(memory_info['free']), gb_conversion(memory_info['free']), memory_info['free']),
-        'Free Pcp': (mb_conversion(memory_info['free_pcp']), gb_conversion(memory_info['free_pcp']), memory_info['free_pcp']),
-        'Pagecache': (mb_conversion(memory_info['pagecache']), gb_conversion(memory_info['pagecache']), memory_info['pagecache']),
-        'Reserved': (mb_conversion(memory_info['reserved']), gb_conversion(memory_info['reserved']), memory_info['reserved']),
-        'Hugepages Total': (mb_conversion(hugepages_total_pages), gb_conversion(hugepages_total_pages), hugepages_total_pages),
-        'Hugepages Used': (mb_conversion(hugepages_used_pages), gb_conversion(hugepages_used_pages), hugepages_used_pages),
+        'Active Anon': memory_info['active_anon'],
+        'Inactive Anon': memory_info['inactive_anon'],
+        'Active File': memory_info['active_file'],
+        'Inactive File': memory_info['inactive_file'],
+        'Slab Reclaimable': memory_info['slab_reclaimable'],
+        'Slab Unreclaimable': memory_info['slab_unreclaimable'],
+        'Shmem': memory_info['shmem'],
+        'Pagetables': memory_info['pagetables'],
+        'Free': memory_info['free'],
+        'Free Pcp': memory_info['free_pcp'],
+        'Pagecache': memory_info['pagecache'],
+        'Reserved': memory_info['reserved'],
+        'Hugepages Total': hugepages_total_pages,
+        'Hugepages Used': hugepages_used_pages,
         # Add other memory categories...
     }
 
@@ -120,158 +129,151 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb, s
 
     # Add swap usage to the memory summary
     memory_summary.update({
-        'Swap Total': (mb_conversion(swap_total_pages), gb_conversion(swap_total_pages), swap_total_pages),
-        'Swap Free': (mb_conversion(swap_free_pages), gb_conversion(swap_free_pages), swap_free_pages),
-        'Swap Used': (mb_conversion(swap_used_pages), gb_conversion(swap_used_pages), swap_used_pages),
+        'Swap Total': swap_total_pages,
+        'Swap Free': swap_free_pages,
+        'Swap Used': swap_used_pages,
     })
 
     # Include additional fields if show_full is True
     if show_full:
         memory_summary.update({
-            'Isolated Anon': (mb_conversion(memory_info['isolated_anon']), gb_conversion(memory_info['isolated_anon']), memory_info['isolated_anon']),
-            'Isolated File': (mb_conversion(memory_info['isolated_file']), gb_conversion(memory_info['isolated_file']), memory_info['isolated_file']),
-            'Unevictable': (mb_conversion(memory_info['unevictable']), gb_conversion(memory_info['unevictable']), memory_info['unevictable']),
-            'Dirty': (mb_conversion(memory_info['dirty']), gb_conversion(memory_info['dirty']), memory_info['dirty']),
-            'Writeback': (mb_conversion(memory_info['writeback']), gb_conversion(memory_info['writeback']), memory_info['writeback']),
-            'Mapped': (mb_conversion(memory_info['mapped']), gb_conversion(memory_info['mapped']), memory_info['mapped']),
-            'Bounce': (mb_conversion(memory_info['bounce']), gb_conversion(memory_info['bounce']), memory_info['bounce']),
-            'Free CMA': (mb_conversion(memory_info['free_cma']), gb_conversion(memory_info['free_cma']), memory_info['free_cma']),
-            'Swap cache': (mb_conversion(memory_info['swapcache']), gb_conversion(memory_info['swapcache']), memory_info['swapcache']),
+            'Isolated Anon': memory_info['isolated_anon'],
+            'Isolated File': memory_info['isolated_file'],
+            'Unevictable': memory_info['unevictable'],
+            'Dirty': memory_info['dirty'],
+            'Writeback': memory_info['writeback'],
+            'Mapped': memory_info['mapped'],
+            'Bounce': memory_info['bounce'],
+            'Free CMA': memory_info['free_cma'],
+            'Swap cache': memory_info['swapcache'],
 
         })
 
     # Subtract the rest accounted memory
-    unaccounted_memory_mb = total_memory_mb \
-                          - mb_conversion(memory_info['active_anon']) \
-                          - mb_conversion(memory_info['inactive_anon']) \
-                          - mb_conversion(memory_info['isolated_anon']) \
-                          - mb_conversion(memory_info['pagecache']) \
-                          - mb_conversion(memory_info['swapcache']) \
-                          - mb_conversion(memory_info['slab_reclaimable']) \
-                          - mb_conversion(memory_info['slab_unreclaimable']) \
-                          - mb_conversion(memory_info['pagetables']) \
-                          - mb_conversion(memory_info['free']) \
-                          - mb_conversion(memory_info['reserved']) \
-                          - mb_conversion(memory_info['unevictable']) \
-                          - mb_conversion(memory_info['bounce']) \
-                          - mb_conversion(memory_info['free_cma'] \
-                          - hugepages_total_mb )
+    unaccounted_pages = total_memory_pages \
+        - memory_info['active_anon'] \
+        - memory_info['inactive_anon'] \
+        - memory_info['isolated_anon'] \
+        - memory_info['pagecache'] \
+        - memory_info['swapcache'] \
+        - memory_info['slab_reclaimable'] \
+        - memory_info['slab_unreclaimable'] \
+        - memory_info['pagetables'] \
+        - memory_info['free'] \
+        - memory_info['reserved'] \
+        - memory_info['unevictable'] \
+        - memory_info['bounce'] \
+        - memory_info['free_cma'] \
+        - hugepages_total_pages
 
     if verbose:
-        print("\nUnaccounted memory = Total Memory \
-- Active Anon \
-- Inactive Anon \
-- Isolated Anon \
-- Pagecache \
-- Swapcache \
-- Slab Reclaimable \
-- Slab Unreclaimable \
-- Pagetables \
-- Free \
-- Reserved \
-- Uevictable \
-- Bounce \
-- Free Cma \
-- Huge pages\n")
+        print("\nUnaccounted memory = Total Memory"
+              " - Active Anon"
+              " - Inactive Anon"
+              " - Isolated Anon"
+              " - Pagecache"
+              " - Swapcache"
+              " - Slab Reclaimable"
+              " - Slab Unreclaimable"
+              " - Pagetables"
+              " - Free"
+              " - Reserved"
+              " - Unevictable"
+              " - Bounce"
+              " - Free Cma"
+              " - Huge pages\n")
 
-        print(f"{unaccounted_memory_mb:.2f} = {total_memory_mb:.2f} \
-- {mb_conversion(memory_info.get('active_anon', 0)):.2f} \
-- {mb_conversion(memory_info.get('inactive_anon', 0)):.2f} \
-- {mb_conversion(memory_info.get('isolated_anon')):.2f} \
-- {mb_conversion(memory_info.get('pagecache', 0)):.2f} \
-- {mb_conversion(memory_info.get('swapcache', 0)):.2f} \
-- {mb_conversion(memory_info.get('slab_reclaimable', 0)):.2f} \
-- {mb_conversion(memory_info.get('slab_unreclaimable', 0)):.2f} \
-- {mb_conversion(memory_info.get('pagetables', 0)):.2f} \
-- {mb_conversion(memory_info.get('free', 0)):.2f} \
-- {mb_conversion(memory_info.get('reserved', 0)):.2f} \
-- {mb_conversion(memory_info.get('unevictable')):.2f} \
-- {mb_conversion(memory_info.get('bounce')):.2f} \
-- {mb_conversion(memory_info.get('free_cma')):.2f} \
-- {hugepages_total_mb:.2f}")
+        print(f"{scale_value(unaccounted_pages, 'pages', 'M', pagesize_kb):.2f} = "
+              f"{scale_value(total_memory_pages, 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('active_anon', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('inactive_anon', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('isolated_anon', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('pagecache', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('swapcache', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('slab_reclaimable', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('slab_unreclaimable', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('pagetables', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('free', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('reserved', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('unevictable', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('bounce', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(memory_info.get('free_cma', 0), 'pages', 'M', pagesize_kb):.2f} "
+              f"- {scale_value(hugepages_total_pages, 'pages', 'M', pagesize_kb):.2f}")
 
     # Return memory summary, total memory details, etc.
-    return memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb
+    return memory_summary, total_memory_pages, unaccounted_pages
 
-def print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb, timestamp, show_in_page, show_in_gb, show_unaccounted, show_in_mb=True, verbose=False):
+def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timestamp,
+                  unit='M', pagesize_kb=4, show_unaccounted=False, verbose=False):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
-    # Only show the Timestamp, without any additional "Event" lines.
-    header = f"\nTimestamp: {timestamp}"
-    header += f"\n{'Category':<25}"
-    lines = 25
 
-    if show_in_page:
-        header += f" {'Pages':>15}"
-        lines +=16
-    if show_in_mb:
-        header += f" {'MB':>15}"
-        lines +=16
-    if show_in_gb:
-        header += f" {'GB':>10}"
-        lines +=11
+    unit_label = {
+        'P': 'Pages',
+        'K': 'KiB',
+        'M': 'MB',
+        'G': 'GB'
+    }.get(unit, 'MB')
 
-    header += f"\n{'='*lines}"
-    print(header)
+    print(f"\nTimestamp: {timestamp}")
+    print(f"{'Category':<25} {unit_label:>15}")
+    print("=" * 40)
 
-    for key, (mb, gb, pages) in memory_summary.items():
-        body = f"{key:<25}"
-        if show_in_page:
-            body += f" {pages:>15,}"
-        if show_in_mb:
-            body += f"{mb:>15,.2f} "
-        if show_in_gb:
-            body += f" {gb:>10,.2f}"
-        print(body)
+    for key, pages in memory_summary.items():
+        val = scale_value(pages, 'pages', unit, pagesize_kb)
 
-    # Print the unaccounted memory if the -u flag is provided
+        print(f"{key:<25} {val:>15,.2f}")
+
+    # Show unaccounted memory if requested
     if show_unaccounted:
-        body_unaccounted = f"{'-'*lines}\n{'Unaccounted Memory':<25}"
-        if show_in_page:
-            body_unaccounted += f" {'':>15}"
-        if show_in_mb:
-            body_unaccounted += f" {unaccounted_memory_mb:>15,.2f}"
-        if show_in_gb:
-            body_unaccounted += f" {unaccounted_memory_mb/1024:>10,.2f}"
-        print(body_unaccounted)
+        print("-" * 40)
+        print(f"{'Unaccounted Memory':<25}", end=' ')
+        if unit == 'P':
+            pages = unaccounted_pages
+            print(f"{pages:>15,}")
+        elif unit == 'K':
+            print(f"{scale_value(unaccounted_pages, 'pages', 'K', pagesize_kb):>15,.2f}")
+        elif unit == 'M':
+            print(f"{scale_value(unaccounted_pages, 'pages', 'M', pagesize_kb):>15,.2f}")
+        elif unit == 'G':
+            print(f"{scale_value(unaccounted_pages, 'pages', 'G', pagesize_kb):>15,.2f}")
 
-    # Print the total memory size at the bottom
-    tail = f"{'Total Memory':<25}"
-    if show_in_page:
-        tail += f" {total_memory_pages:>15,}"
-    if show_in_mb:
-        tail += f" {total_memory_mb:>15,.2f}"
-    if show_in_gb:
-        tail += f" {total_memory_gb:>10,.2f}"
-    tail = f"{'='*lines}\n" + tail
-    print(tail)
+    # Footer
+    print("=" * 40)
+    print(f"{'Total Memory':<25}", end=' ')
+    if unit == 'P':
+        print(f"{total_memory_pages:>15,}")
+    elif unit == 'K':
+        print(f"{scale_value(total_memory_pages, 'pages', 'K', pagesize_kb):>15,.2f}")
+    elif unit == 'M':
+        print(f"{scale_value(total_memory_pages, 'pages', 'M', pagesize_kb):>15,.2f}")
+    elif unit == 'G':
+        print(f"{scale_value(total_memory_pages, 'pages', 'G', pagesize_kb):>15,.2f}")
 
 def main():
     # Use argparse for flexible option parsing
     parser = argparse.ArgumentParser(description="Parse OOM logs and display memory summaries.")
+    parser.add_argument("-K", action="store_const", const="K", dest="unit", help="Display memory in KiB")
+    parser.add_argument("-M", action="store_const", const="M", dest="unit", help="Display memory in MiB")
+    parser.add_argument("-P", action="store_const", const="P", dest="unit", help="Display memory in pages")
+    parser.add_argument("-G", action="store_const", const="G", dest="unit", help="Display memory in GiB")
+    parser.set_defaults(unit="M")
 
     # Define the flags
-    parser.add_argument('-p', '--page', action='store_true', help="Show memory usage in page.")
-    parser.add_argument('-g', '--gigabyte', action='store_true', help="Show memory usage in GB.")
-    parser.add_argument('-m', '--megabyte', action='store_true', help="Show memory usage in MB.")
+    parser.add_argument('--pagesize', type=int, default=4, help="Page size in KB (default: 4)")
+
     parser.add_argument('-u', '--unaccounted', action='store_true', help="Show unaccounted memory.")
     parser.add_argument('-f', '--full', action='store_true', help="Show full memory info.")
     parser.add_argument('-v', '--verbose', action='store_true', help="Show verbose memory info.")
-    parser.add_argument('-s', '--pagesize', metavar='SIZE_KB', type=int, default=4, help="Set custom page size in KB (default: 4 KB).")
-
-    # Define the positional argument for log file name
     parser.add_argument('log_filename', metavar='log_filename', type=str, help="Log file to parse.")
 
     # Parse arguments
     args = parser.parse_args()
     pagesize_kb = args.pagesize
-
-    show_in_page = args.page
-    show_in_gb = args.gigabyte
-    show_in_mb = True if not args.megabyte and not show_in_gb and not show_in_page else args.megabyte
     show_unaccounted = args.unaccounted
     show_full = args.full
     log_filename = args.log_filename
     verbose = args.verbose
+    unit = args.unit
 
     # Read and parse the log file
     log_data = parse_log_file(log_filename)
@@ -280,13 +282,10 @@ def main():
     # Iterate over each memory event in the log file
     for timestamp, memory_info, total_hugepages_kb, used_hugepages_kb in mem_info_list:
         # Calculate memory usage, now including hugepage memory
-        memory_summary, total_memory_mb, total_memory_gb, total_memory_pages, unaccounted_memory_mb = calculate_memory_usage(
-            memory_info, total_hugepages_kb, used_hugepages_kb, show_full, pagesize_kb, verbose)
+        memory_summary, total_memory_pages, unaccounted_pages = calculate_memory_usage(memory_info, total_hugepages_kb, used_hugepages_kb, show_full, unit, pagesize_kb, verbose)
 
         # Print memory summary for each event
-        print_summary(memory_summary, total_memory_mb, total_memory_gb, total_memory_pages,
-                      unaccounted_memory_mb, timestamp, show_in_page, show_in_gb, show_unaccounted,
-                      show_in_mb, verbose)
+        print_summary(memory_summary, total_memory_pages, unaccounted_pages, timestamp, unit, pagesize_kb, show_unaccounted, verbose)
 
 if __name__ == "__main__":
     main()
