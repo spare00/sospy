@@ -161,7 +161,6 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
         - memory_info['pagetables'] \
         - memory_info['free'] \
         - memory_info['reserved'] \
-        - memory_info['unevictable'] \
         - memory_info['bounce'] \
         - memory_info['free_cma'] \
         - hugepages_total_pages
@@ -178,7 +177,6 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
               " - Pagetables"
               " - Free"
               " - Reserved"
-              " - Unevictable"
               " - Bounce"
               " - Free Cma"
               " - Huge pages\n")
@@ -195,7 +193,6 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
               f"- {scale_value(memory_info.get('pagetables', 0), 'pages', 'M', pagesize_kb):.2f} "
               f"- {scale_value(memory_info.get('free', 0), 'pages', 'M', pagesize_kb):.2f} "
               f"- {scale_value(memory_info.get('reserved', 0), 'pages', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('unevictable', 0), 'pages', 'M', pagesize_kb):.2f} "
               f"- {scale_value(memory_info.get('bounce', 0), 'pages', 'M', pagesize_kb):.2f} "
               f"- {scale_value(memory_info.get('free_cma', 0), 'pages', 'M', pagesize_kb):.2f} "
               f"- {scale_value(hugepages_total_pages, 'pages', 'M', pagesize_kb):.2f}")
