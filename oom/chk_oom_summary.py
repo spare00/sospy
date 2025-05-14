@@ -209,22 +209,20 @@ def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timesta
     print(f"\nTimestamp: {timestamp}")
     print(f"{'Category':<25} {unit_label:>15}")
     print("=" * 40)
+    print(f"{'Total Memory':<25}", end=' ')
+    print(f"{scale_value(total_memory_pages, 'P', unit, pagesize_kb):>15,.2f}")
 
     for key, pages in memory_summary.items():
         val = scale_value(pages, 'P', unit, pagesize_kb)
 
         print(f"{key:<25} {val:>15,.2f}")
 
-    # Show unaccounted memory if requested
-    if show_unaccounted:
-        print("-" * 40)
-        print(f"{'Unaccounted Memory':<25}", end=' ')
-        print(f"{scale_value(unaccounted_pages, 'P', unit, pagesize_kb):>15,.2f}")
-
     # Footer
     print("=" * 40)
-    print(f"{'Total Memory':<25}", end=' ')
-    print(f"{scale_value(total_memory_pages, 'P', unit, pagesize_kb):>15,.2f}")
+    # Show unaccounted memory if requested
+    if show_unaccounted:
+        print(f"{'Unaccounted Memory':<25}", end=' ')
+        print(f"{scale_value(unaccounted_pages, 'P', unit, pagesize_kb):>15,.2f}")
 
 def main():
     # Use argparse for flexible option parsing
