@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import re
 import os
 import argparse
 
@@ -11,13 +12,27 @@ FIELDS = [
     "Active(anon)", "Inactive(anon)", "AnonPages",
     "Unevictable", "Slab", "KernelStack",
     "PageTables", "Percpu",
-    "HugePages_Total", "Hugepagesize"
+    "HugePages_Total", "Hugepagesize", "Hugetlb"
 ]
 
 def scale_value(kb, unit):
     if unit == "K": return kb
     if unit == "M": return kb / 1024
     if unit == "G": return kb / (1024 * 1024)
+
+def size_str_to_kb(size_str):
+    if not size_str:
+        return None
+    try:
+        if size_str.endswith("G"):
+            return int(size_str[:-1]) * 1024 * 1024
+        elif size_str.endswith("M"):
+            return int(size_str[:-1]) * 1024
+        elif size_str.endswith("K"):
+            return int(size_str[:-1])
+    except:
+        pass
+    return None
 
 def parse_meminfo(path, verbose=False):
     if not os.path.isfile(path):
@@ -48,12 +63,76 @@ def compute_anonpages(meminfo):
     print("Error: AnonPages is not available and cannot be calculated.")
     sys.exit(1)
 
-def compute_hugepages(meminfo):
-    if "HugePages_Total" in meminfo and "Hugepagesize" in meminfo:
-        meminfo["HugePages"] = meminfo["HugePages_Total"] * meminfo["Hugepagesize"]
+def parse_cmdline_hugepages():
+    hugepages = None
+    hugepagesz = None
+    default_hugepagesz = None
+
+    cmdline_path = "proc/cmdline"
+    if not os.path.isfile(cmdline_path):
+        return None, None
+
+    with open(cmdline_path, "r") as f:
+        cmdline = f.read()
+
+    match = re.search(r"hugepages=(\d+)", cmdline)
+    if match:
+        hugepages = int(match.group(1))
+
+    match = re.search(r"default_hugepagesz=(\S+)", cmdline)
+    if match:
+        default_hugepagesz = match.group(1)
+
+    match = re.search(r"hugepagesz=(\S+)", cmdline)
+    if match:
+        hugepagesz = match.group(1)
+
+    # Prefer explicit size
+    size = hugepagesz or default_hugepagesz
+    return hugepages, size
+
+def compute_hugepages(meminfo, debug=False):
+    note = ""
+    # Priority 1: Use Hugetlb directly from meminfo (RHEL8+)
+    if "Hugetlb" in meminfo:
+        meminfo["HugePages"] = meminfo["Hugetlb"]
+        if debug:
+            print(f"DEBUG: Using 'Hugetlb' from meminfo: {meminfo['HugePages']} KiB")
         return
-    print("Error: Required HugePages_Total or Hugepagesize not found.")
-    sys.exit(1)
+
+    # Priority 2: Use kernel cmdline hints
+    hugepages, size_str = parse_cmdline_hugepages()
+    size_kb = size_str_to_kb(size_str)
+
+    if debug:
+        print(f"DEBUG: from cmdline: hugepages: {hugepages} {size_kb > 2048}")
+        if size_kb > 2048:
+            print(f"DEBUG: from cmdline: hugepagesz:: \033[91m{size_kb}\033[0m")
+        else:
+            print(f"DEBUG: from cmdline: hugepagesz:: {size_kb}")
+    if hugepages is not None and size_kb is not None:
+        meminfo["HugePages"] = hugepages * size_kb
+        if debug:
+            print(f"DEBUG: Calculated HugePages from cmdline: {hugepages} × {size_kb} KiB = {meminfo['HugePages']} KiB")
+        return
+
+    # Priority 3: Fallback to sysfs (only if size known)
+    if size_kb:
+        sys_path = os.path.join(root, f"sys/kernel/mm/hugepages/hugepages-{size_kb}kB/nr_hugepages")
+        if os.path.isfile(sys_path):
+            try:
+                with open(sys_path) as f:
+                    count = int(f.read().strip())
+                    meminfo["HugePages"] = count * size_kb
+                    if debug:
+                        print(f"DEBUG: Fallback sysfs HugePages: {count} × {size_kb} KiB = {meminfo['HugePages']} KiB")
+                    return
+            except Exception as e:
+                print(f"Error reading {sys_path}: {e}")
+
+    # If all fail
+    print("Warning: HugePages usage could not be determined.")
+    meminfo["HugePages"] = 0
 
 def calculate_unaccounted(meminfo, show_anonpages):
     total = meminfo.get("MemTotal")
@@ -63,9 +142,7 @@ def calculate_unaccounted(meminfo, show_anonpages):
 
     accounted = []
     for field in FIELDS:
-        if field == "MemTotal":
-            continue
-        if field in ("Unevictable"):
+        if field in ("MemTotal", "Unevictable", "Hugetlb"):
             continue
         if field == "AnonPages" and not show_anonpages:
             continue
@@ -116,6 +193,11 @@ def parse_args():
         "-v", "--verbose", action="store_true",
         help="Enable verbose output"
     )
+    parser.add_argument(
+        "-d", "--debug", action="store_true",
+        help="Enable debug output (paths, hugepages, fallback logic)"
+    )
+
     parser.add_argument("-u", "--unaccounted", dest="unaccounted", action="store_true", default=True,
         help="Include unaccounted memory calculation (default: enabled)")
 
@@ -129,9 +211,10 @@ def parse_args():
 
 def main():
     args = parse_args()
+
     meminfo = parse_meminfo(args.filename, args.verbose)
     show_anonpages = compute_anonpages(meminfo)
-    compute_hugepages(meminfo)
+    compute_hugepages(meminfo, debug=args.debug)
 
     if args.unaccounted:
         total, accounted_sum, unaccounted, accounted_fields = calculate_unaccounted(meminfo, show_anonpages)
