@@ -105,8 +105,7 @@ def compute_hugepages(meminfo, debug=False):
     size_kb = size_str_to_kb(size_str)
 
     if debug:
-        print(f"DEBUG: from cmdline: hugepages: {hugepages} {size_kb > 2048}")
-        if size_kb > 2048:
+        if size_kb and size_kb > 2048:
             print(f"DEBUG: from cmdline: hugepagesz:: \033[91m{size_kb}\033[0m")
         else:
             print(f"DEBUG: from cmdline: hugepagesz:: {size_kb}")
