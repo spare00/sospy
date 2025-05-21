@@ -204,7 +204,7 @@ def parse_args():
     group.add_argument("-K", action="store_const", const="K", dest="unit", help="Display memory in KiB")
     group.add_argument("-M", action="store_const", const="M", dest="unit", help="Display memory in MiB (default)")
     group.add_argument("-G", action="store_const", const="G", dest="unit", help="Display memory in GiB")
-    parser.set_defaults(unit="M")
+    parser.set_defaults(unit="G")
 
     return parser.parse_args()
 
