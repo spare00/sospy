@@ -16,6 +16,7 @@ SECTION_HEADERS = [
     "kbhugfree",  # Hugepages
     "dentunusd",  # File/inode
     "runq-sz",    # Load average / scheduler
+    "dropd/s",    # Network frames
 ]
 
 def get_sar_file_from_date():
@@ -51,12 +52,12 @@ def process_segment(lines, tail_lines=None, debug=False):
     section_header = ""
     buffer = deque()
     average_line = ""
-    is_cpu_section = False
+    is_multicore_section = False
     section_key = None
     current_section = False
 
     def flush_section():
-        nonlocal buffer, section_header, average_line, section_key, is_cpu_section, current_section
+        nonlocal buffer, section_header, average_line, section_key, is_multicore_section, current_section
         if not buffer:
             return
         shown = list(buffer)[-tail_lines:] if tail_lines else list(buffer)
@@ -68,7 +69,7 @@ def process_segment(lines, tail_lines=None, debug=False):
         average_line = ""
         section_header = ""
         section_key = None
-        is_cpu_section = False
+        is_multicore_section = False
         current_section = False
 
     for line in lines:
@@ -93,20 +94,20 @@ def process_segment(lines, tail_lines=None, debug=False):
             flush_section()
             section_header = line
             section_key = key_fields
-            is_cpu_section = "%usr" in key_fields and "CPU" in tokens
+            is_multicore_section = "CPU" in key_fields
             current_section = True
             continue
 
         if current_section:
             if line.startswith("Average:"):
-                if is_cpu_section:
+                if is_multicore_section:
                     if " all" in line:
                         average_line = line
                 else:
                     average_line = line
                 flush_section()  # Section ends here
             elif re.match(r"^\d{2}:\d{2}:\d{2}", line):
-                if is_cpu_section:
+                if is_multicore_section:
                     if " all " in line:
                         buffer.append(line)
                 else:
