@@ -11,15 +11,20 @@ SECTION_HEADERS = [
     "proc/s",     # Context switches
     "pswpin/s",   # Swap
     "pgpgin/s",   # Paging
+    "rtps",       # I/O request to a physical device
     "kbmemfree",  # Memory
     "kbswpfree",  # Swap summary
     "kbhugfree",  # Hugepages
     "dentunusd",  # File/inode
     "runq-sz",    # Load average / scheduler
-    "dropd/s",    # Network frames
     "DEV",        # Block device
     "rxpck/s",    # statistics from the network devices
     "rxerr/s",    # statistics from the network failures
+    "call/s",     # NFS client activity
+    "scall/s",    # NFS server activity
+    "totsck",     # Statistics on sockets
+    "total/s",    # Software-based network processing
+
 ]
 
 def get_sar_file_from_date():
