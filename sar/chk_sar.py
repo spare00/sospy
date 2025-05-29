@@ -7,7 +7,7 @@ from collections import deque
 
 # Define the unique tokens that mark the start of each sar section
 SECTION_HEADERS = [
-    "%usr",        # CPU section
+    "%usr",       # CPU section
     "proc/s",     # Context switches
     "pswpin/s",   # Swap
     "pgpgin/s",   # Paging
@@ -17,6 +17,9 @@ SECTION_HEADERS = [
     "dentunusd",  # File/inode
     "runq-sz",    # Load average / scheduler
     "dropd/s",    # Network frames
+    "DEV",        # Block device
+    "rxpck/s",    # statistics from the network devices
+    "rxerr/s",    # statistics from the network failures
 ]
 
 def get_sar_file_from_date():
@@ -53,40 +56,52 @@ def process_segment(lines, tail_lines=None, debug=False):
     buffer = deque()
     average_line = ""
     is_multicore_section = False
+    is_block_section = False
     section_key = None
     current_section = False
+    device_set = set()
 
     def flush_section():
-        nonlocal buffer, section_header, average_line, section_key, is_multicore_section, current_section
+        nonlocal buffer, section_header, average_line, section_key
+        nonlocal is_multicore_section, is_block_section, current_section, device_set
+
         if not buffer:
             return
-        shown = list(buffer)[-tail_lines:] if tail_lines else list(buffer)
+
+        if is_block_section and tail_lines:
+            device_count = len(device_set) or 1
+            shown = list(buffer)[-tail_lines * device_count:]
+        else:
+            shown = list(buffer)[-tail_lines:] if tail_lines else list(buffer)
+
         block = [section_header] + shown
         if average_line:
             block.append(average_line)
+
         all_blocks.append(block)
         buffer.clear()
         average_line = ""
         section_header = ""
         section_key = None
         is_multicore_section = False
+        is_block_section = False
         current_section = False
+        device_set = set()
 
     for line in lines:
         line = line.rstrip()
 
-        # Detect a section header line
+        # Detect section header
         if is_section_header(line):
             tokens = line.split()
             key_fields = tuple(tokens[1:])  # skip timestamp
+
             if debug:
                 print(f"[DEBUG] Section header detected: {line}")
 
             if section_key is not None and key_fields != section_key:
                 flush_section()
-
             elif section_key is not None and key_fields == section_key:
-                # Duplicate header, skip
                 if debug:
                     print(f"[DEBUG] Duplicate header (skipped): {line}")
                 continue
@@ -95,7 +110,9 @@ def process_segment(lines, tail_lines=None, debug=False):
             section_header = line
             section_key = key_fields
             is_multicore_section = "CPU" in key_fields
+            is_block_section = any(x in key_fields for x in ("DEV", "IFACE"))  # ✅ updated here
             current_section = True
+            device_set = set()
             continue
 
         if current_section:
@@ -105,15 +122,19 @@ def process_segment(lines, tail_lines=None, debug=False):
                         average_line = line
                 else:
                     average_line = line
-                flush_section()  # Section ends here
+                flush_section()
             elif re.match(r"^\d{2}:\d{2}:\d{2}", line):
                 if is_multicore_section:
                     if " all " in line:
                         buffer.append(line)
                 else:
+                    if is_block_section:
+                        parts = line.split()
+                        if len(parts) > 1:
+                            device_set.add(parts[1])
                     buffer.append(line)
 
-    flush_section()  # Final flush for last segment
+    flush_section()
     return all_blocks
 
 def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
