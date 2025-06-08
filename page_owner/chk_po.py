@@ -6,7 +6,7 @@ import hashlib
 from collections import defaultdict
 
 def parse_page_owner(filename, debug=False):
-    process_data = defaultdict(lambda: {'allocs': 0, 'pages': 0, 'slab_pages': 0, 'non_slab_pages': 0})
+    process_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     module_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     slab_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     process_module_pages = defaultdict(int)
@@ -14,6 +14,7 @@ def parse_page_owner(filename, debug=False):
     calltrace_index = {}
     skipped_allocations = {'missing_match': 0, 'incomplete_trace': 0, 'invalid_order': 0}
 
+    allocations = []
     current_allocation = {}
     current_calltrace = []
     in_trace = False
@@ -47,7 +48,6 @@ def parse_page_owner(filename, debug=False):
                             skipped_allocations['invalid_order'] += 1
                             in_trace = False
                             continue
-
                         current_allocation = {
                             'order': order,
                             'pid': -1,
@@ -76,7 +76,6 @@ def parse_page_owner(filename, debug=False):
                 process_data[process_name]['allocs'] += 1
                 process_data[process_name]['pages'] += pages
 
-                is_slab = False
                 unique_modules = set()
                 for trace_line in current_calltrace:
                     mod_match = re.search(r'\[([^\]]+)\]', trace_line)
@@ -85,15 +84,9 @@ def parse_page_owner(filename, debug=False):
                         unique_modules.add(module)
 
                     if re.search(r'kmalloc|slab|cache|kfree', trace_line, re.IGNORECASE):
-                        is_slab = True
                         func = trace_line.strip().split('+')[0]
                         slab_data[func]['allocs'] += 1
                         slab_data[func]['pages'] += pages
-
-                if is_slab:
-                    process_data[process_name]['slab_pages'] += pages
-                else:
-                    process_data[process_name]['non_slab_pages'] += pages
 
                 for module in unique_modules:
                     module_data[module]['allocs'] += 1
@@ -102,17 +95,24 @@ def parse_page_owner(filename, debug=False):
 
                 trace_str = "\n".join(current_calltrace)
                 trace_key = hashlib.sha256(trace_str.encode()).hexdigest()
-                calltrace_data[trace_key]['count'] += 1
-                calltrace_data[trace_key]['pages'] += pages
+                current_allocation['trace_key'] = trace_key
+                current_allocation['pages'] = pages
+
                 if trace_key not in calltrace_index:
                     calltrace_index[trace_key] = current_calltrace.copy()
+
+                calltrace_data[trace_key]['count'] += 1
+                calltrace_data[trace_key]['pages'] += pages
+
+                allocations.append({"process": process_name, "trace_key": trace_key, "pages": pages})
+
                 in_trace = False
             elif not line:
                 if in_trace:
                     skipped_allocations['incomplete_trace'] += 1
                 in_trace = False
 
-    return process_data, module_data, slab_data, calltrace_data, calltrace_index, process_module_pages, total_allocs, skipped_allocations, valid_allocation_detected
+    return process_data, module_data, slab_data, calltrace_data, calltrace_index, process_module_pages, total_allocs, skipped_allocations, valid_allocation_detected, allocations
 
 def convert_pages(pages, unit):
     kb = pages * 4
@@ -141,35 +141,29 @@ def show_top(data, label, unit, key='pages', top_n=10):
     print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {total_unit}")
     print("=" * 50)
 
-def show_processes_breakdown(process_data, unit, top_n=10):
-    print(f"Top {top_n} Processes with Slab/Non-Slab Breakdown:")
-    print("=" * 70)
-    sorted_items = sorted(process_data.items(), key=lambda x: x[1]['pages'], reverse=True)[:top_n]
-    total_allocs = 0
-    total_pages = 0
-    total_slab_pages = 0
-    total_non_slab_pages = 0
-    print(f"{'Process':<25}{'Allocs':>10}{'Total':>12}{'Slab':>12}{'NonSlab':>12}")
-    for name, stats in sorted_items:
-        total_allocs += stats['allocs']
-        total_pages += stats['pages']
-        total_slab_pages += stats['slab_pages']
-        total_non_slab_pages += stats['non_slab_pages']
-        total_mem, u = convert_pages(stats['pages'], unit)
-        slab_mem, _ = convert_pages(stats['slab_pages'], unit)
-        non_slab_mem, _ = convert_pages(stats['non_slab_pages'], unit)
-        print(f"{name:<25}{stats['allocs']:>10}{total_mem:>12.2f}{slab_mem:>12.2f}{non_slab_mem:>12.2f} {u}")
-    total_mem, u = convert_pages(total_pages, unit)
-    slab_mem, _ = convert_pages(total_slab_pages, unit)
-    non_slab_mem, _ = convert_pages(total_non_slab_pages, unit)
-    print("-" * 70)
-    print(f"{'Total':<25}{total_allocs:>10}{total_mem:>12.2f}{slab_mem:>12.2f}{non_slab_mem:>12.2f} {u}")
-    print("=" * 70)
-
-def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5):
+def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_process=None, process_to_traces=None, allocations=None):
     print(f"Top {top_n} Call Traces:")
     print("=" * 50)
-    sorted_traces = sorted(calltrace_data.items(), key=lambda x: x[1]['count'], reverse=True)[:top_n]
+
+    if filter_by_process and process_to_traces and allocations:
+        allowed_keys = process_to_traces.get(filter_by_process, set())
+
+        # Recalculate count/pages for just this process
+        filtered_stats = defaultdict(lambda: {'count': 0, 'pages': 0})
+        for alloc in allocations:
+            if alloc['process'] == filter_by_process and alloc['trace_key'] in allowed_keys:
+                filtered_stats[alloc['trace_key']]['count'] += 1
+                filtered_stats[alloc['trace_key']]['pages'] += alloc['pages']
+        print(f"done:")
+    else:
+        # Use the full dataset
+        filtered_stats = calltrace_data
+
+    if not filtered_stats:
+        print(f"No call traces found for process '{filter_by_process}'")
+        return
+
+    sorted_traces = sorted(filtered_stats.items(), key=lambda x: x[1]['count'], reverse=True)[:top_n]
     for i, (key, data) in enumerate(sorted_traces, 1):
         mem, unit_label = convert_pages(data['pages'], unit)
         print(f"#{i}: Seen {data['count']} times, {mem:.2f} {unit_label}")
@@ -214,40 +208,46 @@ def main():
     parser.add_argument("-K", dest="unit", action="store_const", const='K', help="Show in KB")
     parser.add_argument("-G", dest="unit", action="store_const", const='G', help="Show in GB")
     parser.add_argument("-p", "--processes", action="store_true", help="Show top memory-using processes")
-    parser.add_argument("--process-breakdown", action="store_true", help="Show slab vs non-slab breakdown for processes (used with -p)")
     parser.add_argument("-m", "--modules", action="store_true", help="Show top memory-using modules")
     parser.add_argument("-s", "--slabs", action="store_true", help="Show top memory-using slab allocators")
     parser.add_argument("-c", "--calltraces", action="store_true", help="Show top 5 call trace patterns")
+    parser.add_argument("--calltrace-process", type=str, help="Show call traces only for this process")
     parser.add_argument("--filter-module", type=str, help="Show top processes using this module")
     args = parser.parse_args()
-
     unit = args.unit or 'G'
+
+    if args.calltrace_process and not args.calltraces:
+        print("Error: '--calltrace-process' requires '-c' or '--calltraces' to be specified.")
+        return
+
+    if args.filter_module and not args.processes:
+        print("Error: '--filter_module' requires '-p' or '--processes' to be specified.")
+        return
 
     if args.verbose:
         print(f"Analyzing {args.file} with unit {unit}")
 
-    process_data, module_data, slab_data, calltrace_data, calltrace_index, process_module_pages, total_allocs, skipped_allocations, valid_allocation_detected = parse_page_owner(args.file, args.debug)
-
-    print("Summary:")
-    print("=" * 50)
-    print()
+    process_data, module_data, slab_data, calltrace_data, calltrace_index, process_module_pages, total_allocs, skipped_allocations, valid_allocation_detected, allocations = parse_page_owner(args.file, args.debug)
 
     if args.processes:
-        if not valid_allocation_detected:
-            print("Process-level allocation data not found in this dump format.")
-            return
-        if args.process_breakdown:
-            show_processes_breakdown(process_data, unit)
+        if args.filter_module:
+            show_processes_for_module(process_module_pages, args.filter_module, unit)
         else:
+            if not valid_allocation_detected:
+                print("Process-level allocation data not found in this dump format.")
+                return
             show_top(process_data, "Processes", unit)
     if args.modules:
         show_top(module_data, "Modules", unit)
     if args.slabs:
         show_top(slab_data, "Slab Functions", unit)
     if args.calltraces:
-        show_calltraces(calltrace_data, calltrace_index, unit)
-    if args.filter_module:
-        show_processes_for_module(process_module_pages, args.filter_module, unit)
+        process_to_traces = defaultdict(set)
+        for alloc in allocations:
+            if not args.calltrace_process or alloc['process'] == args.calltrace_process:
+                process_to_traces[alloc['process']].add(alloc['trace_key'])
+
+        show_calltraces(calltrace_data, calltrace_index, unit, filter_by_process=args.calltrace_process, process_to_traces=process_to_traces, allocations=allocations)
 
     show_skipped(skipped_allocations, args.verbose)
 
