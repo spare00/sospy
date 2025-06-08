@@ -9,7 +9,7 @@ def parse_page_owner(filename, debug=False):
     process_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     module_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     slab_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
-    process_module_pages = defaultdict(int)
+    process_module_pages = defaultdict(lambda: {'pages': 0, 'allocs': 0})
     calltrace_data = defaultdict(lambda: {'count': 0, 'pages': 0})
     calltrace_index = {}
     skipped_allocations = {'missing_match': 0, 'incomplete_trace': 0, 'invalid_order': 0}
@@ -91,7 +91,8 @@ def parse_page_owner(filename, debug=False):
                 for module in unique_modules:
                     module_data[module]['allocs'] += 1
                     module_data[module]['pages'] += pages
-                    process_module_pages[(process_name, module)] += pages
+                    process_module_pages[(process_name, module)]['pages'] += pages
+                    process_module_pages[(process_name, module)]['allocs'] += 1
 
                 trace_str = "\n".join(current_calltrace)
                 trace_key = hashlib.sha256(trace_str.encode()).hexdigest()
@@ -154,7 +155,6 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
             if alloc['process'] == filter_by_process and alloc['trace_key'] in allowed_keys:
                 filtered_stats[alloc['trace_key']]['count'] += 1
                 filtered_stats[alloc['trace_key']]['pages'] += alloc['pages']
-        print(f"done:")
     else:
         # Use the full dataset
         filtered_stats = calltrace_data
@@ -171,24 +171,28 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
         print("-" * 50)
 
 def show_processes_for_module(process_module_pages, module_name, unit, top_n=10):
-    filtered = defaultdict(int)
-    for (proc, mod), pages in process_module_pages.items():
+    aggregated = defaultdict(lambda: {'pages': 0, 'allocs': 0})
+    for (proc, mod), stats in process_module_pages.items():
         if mod == module_name:
-            filtered[proc] += pages
-    if not filtered:
+            aggregated[proc]['pages'] += stats['pages']
+            aggregated[proc]['allocs'] += stats['allocs']
+    if not aggregated:
         print(f"No allocations found for module '{module_name}'.")
         return
+
     print(f"Top {top_n} Processes using module '{module_name}':")
     print("=" * 50)
-    sorted_items = sorted(filtered.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    sorted_items = sorted(aggregated.items(), key=lambda x: x[1]['pages'], reverse=True)[:top_n]
     total_pages = 0
-    for proc, pages in sorted_items:
-        mem, unit_label = convert_pages(pages, unit)
-        total_pages += pages
-        print(f"{proc:<25}{mem:>15.2f} {unit_label}")
+    total_allocs = 0
+    for proc, stats in sorted_items:
+        mem, unit_label = convert_pages(stats['pages'], unit)
+        total_pages += stats['pages']
+        total_allocs += stats['allocs']
+        print(f"{proc:<25}{stats['allocs']:>15}{mem:>15.2f} {unit_label}")
     total_mem, unit_label = convert_pages(total_pages, unit)
     print("-" * 50)
-    print(f"{'Total':<25}{total_mem:>15.2f} {unit_label}")
+    print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {unit_label}")
     print("=" * 50)
 
 def show_skipped(skipped_allocations, verbose=False):
