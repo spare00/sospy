@@ -13,17 +13,26 @@ class Color:
     RESET = '\033[0m'
 
 def parse_strace_line(line):
+    # Handles formats with optional PID and timestamp:
+    # Examples:
+    #   08:52:01.092377 wait4(...) = ... <...>
+    #   55859 22:06:28.492421 mmap(...) = ... <...>
+    
     pattern = (
-        r'^(?:(?P<time>\d{2}:\d{2}:\d{2}\.\d+)\s+)?'
-        r'(?P<syscall>\w+)\((?P<args>.*?)\)\s+='
-        r'\s*(?P<ret>.+?)'
-        r'(?:\s+<(?P<duration>[\d\.]+)>)?'
+        r'^(?:(?P<pid>\d+)\s+)?'                               # Optional PID
+        r'(?:(?P<time>\d{2}:\d{2}:\d{2}\.\d+)\s+)?'            # Optional timestamp
+        r'(?P<syscall>\w+)\((?P<args>.*?)\)\s*='              # Syscall and args
+        r'\s*(?P<ret>.+?)'                                     # Return value
+        r'(?:\s+<(?P<duration>[\d\.]+)>)?'                     # Optional duration
         r'\s*$'
     )
+    
     match = re.match(pattern, line)
     if not match:
         return None
+
     return {
+        'pid': match.group('pid'),
         'timestamp': match.group('time'),
         'syscall': match.group('syscall'),
         'args': match.group('args'),
