@@ -18,17 +18,21 @@ def extract_code_blocks(filename):
         lines = f.readlines()
 
     for i, line in enumerate(lines):
+        # Grab RIP if available
         rip_match = re.search(r'\[\s*\d+\.\d+\]\s+RIP:\s+(\S+):(.+)', line)
         if rip_match:
             segment = rip_match.group(1)
             location = rip_match.group(2).strip()
             current_rip = f"{segment}:{location}"
 
-        code_match = re.search(r'(\[\s*\d+\.\d+\])\s+Code:\s+.*', line)
-        if code_match:
-            timestamp = code_match.group(1)
-            code_line = line.strip()
-            blocks.append((timestamp, current_rip, code_line, i, lines))  # include line index + full log
+        if ' Code: ' in line:
+            parts = line.split(' Code: ', 1)
+            timestamp = parts[0].strip()
+            code_line = 'Code: ' + parts[1].strip()  # preserve 'Code:' prefix
+
+            # ✅ Skip validation — just pass raw code line
+            blocks.append((timestamp, current_rip or '[unknown]', code_line, i, lines))
+
     return blocks
 
 def run_decodecode(code_line, debug=False):
