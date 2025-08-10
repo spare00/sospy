@@ -10,7 +10,7 @@ DEFAULT_MEMINFO = "proc/meminfo"
 FIELDS = [
     "MemTotal", "MemFree", "Buffers", "Cached", "SwapCached",
     "Active(anon)", "Inactive(anon)", "AnonPages",
-    "Unevictable", "Slab", "KernelStack",
+    "Unevictable", "Slab", "KernelStack", "Shmem",
     "PageTables", "Percpu",
     "HugePages_Total", "Hugepagesize", "Hugetlb"
 ]
