@@ -6,7 +6,7 @@ import argparse
 
 from config import patterns, mem_info_pattern, oom_pattern
 
-def scale_value(value, from_unit="P", to_unit="M", pagesize_kb=4):
+def scale_value(value, from_unit="P", to_unit="G", pagesize_kb=4):
     """
     Convert a memory value from pages or KB to the desired unit.
     - from_unit: "P" or "K"
@@ -97,7 +97,7 @@ def extract_memory_info(log_data):
     return mem_info_list
 
 def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
-                           show_full, unit='M', pagesize_kb=4, verbose=False):
+                           show_full, unit='G', pagesize_kb=4, verbose=False):
     """Calculate memory usage summary from memory info."""
 
     total_memory_pages = memory_info.get('total_pages_ram', 0)
@@ -201,10 +201,10 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
     return memory_summary, total_memory_pages, unaccounted_pages
 
 def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timestamp,
-                  unit='M', pagesize_kb=4, show_unaccounted=False, verbose=False):
+                  unit='G', pagesize_kb=4, show_unaccounted=False, verbose=False):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
 
-    unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'MB')
+    unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'GB')
 
     print(f"\nTimestamp: {timestamp}")
     print(f"{'Category':<25} {unit_label:>15}")
@@ -231,7 +231,7 @@ def main():
     parser.add_argument("-M", action="store_const", const="M", dest="unit", help="Display memory in MiB")
     parser.add_argument("-P", action="store_const", const="P", dest="unit", help="Display memory in pages")
     parser.add_argument("-G", action="store_const", const="G", dest="unit", help="Display memory in GiB")
-    parser.set_defaults(unit="M")
+    parser.set_defaults(unit="G")
 
     # Define the flags
     parser.add_argument('--pagesize', type=int, default=4, help="Page size in KB (default: 4)")

@@ -5,7 +5,7 @@ import sys
 import argparse
 from collections import defaultdict
 
-def scale_value(value, from_unit="P", to_unit="M", pagesize_kb=4):
+def scale_value(value, from_unit="P", to_unit="G", pagesize_kb=4):
     if from_unit == 'P':
         value_kb = value * pagesize_kb
     elif from_unit == 'K':
@@ -82,7 +82,7 @@ def extract_rss_and_swap_usage(oom_events):
 
     return usage_info
 
-def display_usage(event_usage, include_swap=False, unit="M", pagesize_kb=4):
+def display_usage(event_usage, include_swap=False, unit="G", pagesize_kb=4):
     """
     Displays the RSS and optionally swap usage information in GB only.
     Args:
@@ -90,7 +90,7 @@ def display_usage(event_usage, include_swap=False, unit="M", pagesize_kb=4):
         include_swap (bool): Whether to display swap usage.
     """
 
-    unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'MB')
+    unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'GB')
 
     for event, usage in event_usage.items():
         sorted_usage = sorted(usage.items(), key=lambda x: x[1]['rss'], reverse=True)
@@ -126,7 +126,7 @@ def main():
     unit_group.add_argument('-M', action='store_const', const='M', dest='unit', help='Display memory in MiB')
     unit_group.add_argument('-G', action='store_const', const='G', dest='unit', help='Display memory in GiB')
     unit_group.add_argument('-P', action='store_const', const='P', dest='unit', help='Display memory in pages')
-    parser.set_defaults(unit='M')
+    parser.set_defaults(unit='G')
 
     parser.add_argument('log_file', help="Path to the OOM log file")
     parser.add_argument('-s', '--swap', action='store_true', help="Include swap usage in the output")
