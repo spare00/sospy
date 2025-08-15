@@ -15,6 +15,10 @@ FIELDS = [
     "HugePages_Total", "Hugepagesize", "Hugetlb"
 ]
 
+FIELDS_EXTRA = [
+    "SReclaimable", "SUnreclaim"
+]
+
 def scale_value(kb, unit):
     if unit == "K": return kb
     if unit == "M": return kb / 1024
@@ -52,6 +56,15 @@ def parse_meminfo(path, verbose=False):
                 except ValueError:
                     if verbose:
                         print(f"Skipping line due to non-integer value: {line.strip()}")
+            if verbose:
+                if key in FIELDS_EXTRA:
+                    try:
+                        meminfo[key] = int(parts[1])
+                    except ValueError:
+                        if verbose:
+                            print(f"Skipping line due to non-integer value: {line.strip()}")
+
+
     return meminfo
 
 def compute_anonpages(meminfo):
@@ -139,7 +152,7 @@ def calculate_unaccounted(meminfo, show_anonpages):
         print("Error: MemTotal not found.")
         sys.exit(1)
 
-    accounted = []
+    accounted_fields = []
     for field in FIELDS:
         if field in ("MemTotal", "Unevictable", "Hugetlb"):
             continue
@@ -150,12 +163,12 @@ def calculate_unaccounted(meminfo, show_anonpages):
         if field in ("HugePages_Total", "Hugepagesize"):
             continue
         if field in meminfo:
-            accounted.append(field)
+            accounted_fields.append(field)
     if "HugePages" in meminfo:
-        accounted.append("HugePages")
+        accounted_fields.append("HugePages")
 
-    accounted_sum = sum(meminfo[field] for field in accounted)
-    return total, accounted_sum, total - accounted_sum, accounted
+    accounted_sum = sum(meminfo[field] for field in accounted_fields)
+    return total, accounted_sum, total - accounted_sum, accounted_fields
 
 def print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, verbose, show_anonpages, unit):
     unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}.get(unit, "MiB")
@@ -177,6 +190,13 @@ def print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, v
     print(f"{'MemTotal:':<20} {scale_value(total, unit):>20.2f}")
     for key in accounted_fields:
         print(f"{key:<20} {scale_value(meminfo[key], unit):>20.2f}")
+
+    # Extra fields for verbose
+    if verbose:
+        for key in FIELDS_EXTRA:
+            if key in meminfo:
+                print(f"{key:<20} {scale_value(meminfo[key], unit):>20.2f}")
+
     print("=" * len(header))
     print(f"{'Unaccounted:':<20} {scale_value(unaccounted, unit):>20.2f}\n")
 
