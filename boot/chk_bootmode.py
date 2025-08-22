@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
 """
 chk_bootmode.py — Determine boot mode (UEFI vs Legacy BIOS) and Secure Boot state from a sosreport.
-No runtime tools (e.g., mokutil) are assumed; we only use files inside the sosreport.
+It does not execute any commands; it only inspects files inside a sosreport archive or directory.
+
+Features:
+  * Detect UEFI vs BIOS from mounts, findmnt, dmesg, sysfs.
+  * Use sos.json and sos.log for hints.
+  * Parse captured mokutil output (sos_commands/boot/mokutil_--sb-state).
+  * Report Secure Boot status: enabled / disabled / unknown / not-applicable.
+  * Verbose (-v) shows evidence lines.
 
 Usage:
-  ./chk_bootmode.py             # run inside sosreport directory
-  ./chk_bootmode.py /path/to/sos  # or point to dir/tar(.gz|.xz)
-  ./chk_bootmode.py -v [path]   # verbose evidence
+  ./chk_bootmode.py [-v] [sosreport-dir|sosreport.tar.xz]
 
 Exit codes:
-  0 -> Determined (UEFI or BIOS); Secure Boot may be unknown
-  2 -> Unknown (insufficient evidence to classify boot mode)
+  0 -> Determined (UEFI or BIOS)
+  2 -> Unknown
 """
 
 import os
 import re
 import sys
 import tarfile
-from typing import Optional, List, Tuple
+import json
+from typing import Optional, List, Tuple, Dict
 
 STRONG_UEFI = 5
 STRONG_BIOS = 5
@@ -57,7 +63,6 @@ class SosReader:
                         return f.read()
                 except Exception:
                     return None
-            # suffix search (sos often has a top-level dir prefix)
             for dirpath, _, filenames in os.walk(self.root):
                 for fn in filenames:
                     full = os.path.join(dirpath, fn)
@@ -84,7 +89,7 @@ class SosReader:
             return data.decode("utf-8", errors="replace")
         return None
 
-# -------- scanners (no mokutil here) --------
+# --- scanners ---
 
 def scan_efibootmgr(text: str, ev: List[str]) -> int:
     score = 0
@@ -94,18 +99,29 @@ def scan_efibootmgr(text: str, ev: List[str]) -> int:
         ev.append("efibootmgr: Found BootOrder/BootCurrent → UEFI")
         score += STRONG_UEFI
     if "EFI variables are not supported on this system" in text:
-        ev.append("efibootmgr: EFI variables not supported → BIOS")
+        ev.append("efibootmgr: 'EFI variables are not supported' → BIOS")
         score -= STRONG_BIOS
     return score
 
-def scan_mounts(text: str, ev: List[str]) -> int:
+def scan_mokutil_file(text: str, ev: List[str]) -> str:
+    if not text:
+        return "unknown"
+    m = re.search(r"\bSecureBoot\s+(enabled|disabled)\b", text, re.I)
+    if m:
+        state = m.group(1).lower()
+        ev.append(f"mokutil file: SecureBoot {state}")
+        return state
+    if "EFI variables are not supported on this system" in text:
+        ev.append("mokutil file: 'EFI variables are not supported' (BIOS context)")
+    return "unknown"
+
+def scan_mounts_text(text: str, ev: List[str]) -> int:
     score = 0
     if not text:
         return score
     if re.search(r"\befivarfs on /sys/firmware/efi/efivars\b", text):
         ev.append("mounts: efivarfs mounted at /sys/firmware/efi/efivars → UEFI")
         score += STRONG_UEFI
-    # Weak: /boot/efi or /efi VFAT can exist even in BIOS boots
     if re.search(r"\s/boot/efi\s+type\s+vfat\b", text) or re.search(r"\s/efi\s+type\s+vfat\b", text):
         ev.append("mounts: /boot/efi or /efi VFAT mounted (weak indicator)")
         score += WEAK_UEFI
@@ -114,96 +130,150 @@ def scan_mounts(text: str, ev: List[str]) -> int:
         score -= 1
     return score
 
+def scan_findmnt_text(text: str, ev: List[str]) -> int:
+    score = 0
+    if not text:
+        return score
+    for ln in text.splitlines():
+        if "/sys/firmware/efi/efivars" in ln and "efivarfs" in ln:
+            ev.append("findmnt: /sys/firmware/efi/efivars (efivarfs) → UEFI")
+            score += STRONG_UEFI
+            break
+    for ln in text.splitlines():
+        if ("/boot/efi" in ln or "/efi" in ln) and "vfat" in ln:
+            ev.append("findmnt: /boot/efi or /efi (vfat) present (weak indicator)")
+            score += WEAK_UEFI
+            break
+    return score
+
 def scan_dmesg(text: str, ev: List[str]) -> Tuple[int, Optional[str]]:
     score = 0
     sb_state = None
     if not text:
         return score, sb_state
-    # UEFI runtime signals
     if re.search(r"\bEFI v[\d\.]+", text) or "EFI: Loaded cert" in text or re.search(r"\befi:\s", text, re.I):
         ev.append("dmesg: EFI runtime / cert messages present → UEFI")
         score += STRONG_UEFI
-    # Explicit Secure Boot state (only trust explicit strings)
     m = re.search(r"\bSecure boot (enabled|disabled)\b", text, re.I)
     if m:
         sb_state = m.group(1).lower()
         ev.append(f"dmesg: Secure boot {sb_state}")
-        score += STRONG_UEFI  # implies UEFI path
+        score += STRONG_UEFI
     return score, sb_state
 
 def scan_sysfs_listing(text: str, ev: List[str]) -> int:
+    if not text:
+        return 0
+    if "efi" in text:
+        ev.append("ls /sys/firmware: efi present → UEFI")
+        return STRONG_UEFI
+    return 0
+
+def parse_sos_json(text: str) -> Dict[str, Dict]:
+    out: Dict[str, Dict] = {}
+    try:
+        obj = json.loads(text)
+    except Exception:
+        return out
+    def walk(o):
+        if isinstance(o, dict):
+            if "name" in o and "return_code" in o:
+                out[o["name"]] = {"href": o.get("href"), "return_code": o.get("return_code")}
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o: walk(v)
+    walk(obj)
+    return out
+
+def scan_sos_logs(text: str, ev: List[str]) -> int:
     score = 0
     if not text:
         return score
-    if re.search(r"^/sys/firmware/efi:", text, re.M) or " efivars" in text:
-        ev.append("ls /sys/firmware: efi present → UEFI")
-        score += STRONG_UEFI
+    if "EFI variables are not supported on this system" in text:
+        ev.append("sos.log: 'EFI variables are not supported' observed → BIOS")
+        score -= STRONG_BIOS
+    if "collecting output of 'efibootmgr -v'" in text:
+        ev.append("sos.log: efibootmgr -v was executed (output may be elsewhere)")
+    if "collecting output of 'mokutil --sb-state'" in text:
+        ev.append("sos.log: mokutil --sb-state was executed (output may be elsewhere)")
     return score
 
-# -------- detection --------
+# --- detection ---
 
 def detect(reader: SosReader) -> Tuple[str, str, List[str], int]:
     evidence: List[str] = []
     score = 0
-    dmesg_txt = None
     dmesg_sb = None
+    mokutil_sb = None
 
     candidates = {
-        "efibootmgr": [
-            "sos_commands/boot/efibootmgr_-v",
-            "sos_commands/boot/efibootmgr",
-        ],
-        "mounts": [
-            "sos_commands/filesys/mount_-l",
-            "sos_commands/filesys/mount",
-            "sos_commands/filesys/findmnt_-R",
-        ],
-        "dmesg": [
-            "sos_commands/kernel/dmesg",
-            "var/log/dmesg",
-        ],
-        "sysfs": [
-            "sos_commands/kernel/ls_-l_.sys.firmware",
-            "sos_commands/filesys/ls_-alR_.sys.firmware",
-            "sos_commands/kernel/ls_-l_.sys.firmware.efi",
-        ],
+        "efibootmgr": ["sos_commands/boot/efibootmgr_-v", "sos_commands/boot/efibootmgr"],
+        "mokutil_file": ["sos_commands/boot/mokutil_--sb-state"],
+        "mounts": ["sos_commands/filesys/mount_-l", "sos_commands/filesys/mount"],
+        "findmnt": ["sos_commands/filesys/findmnt"],
+        "dmesg": ["sos_commands/kernel/dmesg", "sos_commands/kernel/dmesg_-T", "var/log/dmesg"],
+        "sysfs": ["sos_commands/kernel/ls_-l_.sys.firmware"],
+        "sos_json": ["sos_reports/sos.json"],
+        "sos_log": ["sos_logs/sos.log"],
     }
 
-    # efibootmgr (if collected)
     for p in candidates["efibootmgr"]:
         txt = reader.read_text(p)
         if txt:
             score += scan_efibootmgr(txt, evidence)
             break
 
-    # mounts
-    mounts_seen = False
+    for p in candidates["mokutil_file"]:
+        txt = reader.read_text(p)
+        if txt:
+            mokutil_sb = scan_mokutil_file(txt, evidence)
+            if mokutil_sb in {"enabled","disabled"}:
+                score += STRONG_UEFI
+            break
+
     for p in candidates["mounts"]:
         txt = reader.read_text(p)
         if txt:
-            mounts_seen = True
-            score += scan_mounts(txt, evidence)
+            score += scan_mounts_text(txt, evidence)
             break
 
-    # dmesg
+    for p in candidates["findmnt"]:
+        txt = reader.read_text(p)
+        if txt:
+            score += scan_findmnt_text(txt, evidence)
+            break
+
     for p in candidates["dmesg"]:
         txt = reader.read_text(p)
         if txt:
-            dmesg_txt = txt
             s, sb = scan_dmesg(txt, evidence)
             score += s
-            if sb:
-                dmesg_sb = sb
+            if sb: dmesg_sb = sb
             break
 
-    # sysfs listing
     for p in candidates["sysfs"]:
         txt = reader.read_text(p)
         if txt:
             score += scan_sysfs_listing(txt, evidence)
             break
 
-    # Boot mode classification
+    for p in candidates["sos_json"]:
+        txt = reader.read_text(p)
+        if txt:
+            meta = parse_sos_json(txt)
+            for cmd in ("efibootmgr -v", "mokutil --sb-state"):
+                if cmd in meta:
+                    rc = meta[cmd].get("return_code")
+                    evidence.append(f"sos.json: '{cmd}' return_code={rc}")
+            break
+
+    for p in candidates["sos_log"]:
+        txt = reader.read_text(p)
+        if txt:
+            score += scan_sos_logs(txt, evidence)
+            break
+
     if score >= STRONG_UEFI:
         mode = "UEFI"
         rc = 0
@@ -211,28 +281,25 @@ def detect(reader: SosReader) -> Tuple[str, str, List[str], int]:
         mode = "BIOS (Legacy)"
         rc = 0
     else:
-        # If we looked at mounts/dmesg and found no EFI signals at all → assume BIOS
-        has_any_uefi_signal = any(("efivarfs" in e.lower()) or ("efi runtime" in e.lower())
-                                   or ("BootOrder" in e) or ("UEFI" in e)
-                                   for e in evidence)
-        if not has_any_uefi_signal and (mounts_seen or dmesg_txt is not None):
-            evidence.append("Heuristic: no EFI signals in mounts/dmesg/sysfs → BIOS")
+        has_any_uefi_signal = any("efi" in e.lower() or "BootOrder" in e for e in evidence)
+        if not has_any_uefi_signal:
+            evidence.append("Heuristic: no EFI signals in mounts/findmnt/dmesg/sysfs → BIOS")
             mode = "BIOS (Legacy)"
             rc = 0
         else:
             mode = "Unknown"
             rc = 2
 
-    # Secure Boot state (from dmesg only; conservative)
     if mode.startswith("BIOS"):
         sb_state = "not-applicable"
     else:
-        if dmesg_sb in {"enabled", "disabled"}:
+        if mokutil_sb in {"enabled","disabled"}:
+            sb_state = mokutil_sb
+        elif dmesg_sb in {"enabled","disabled"}:
             sb_state = dmesg_sb
         else:
             sb_state = "unknown"
 
-    # Dedup evidence
     dedup, seen = [], set()
     for e in evidence:
         if e not in seen:
@@ -253,7 +320,7 @@ def main():
 
     reader = SosReader(path)
     if not reader.ok():
-        print(f"Error: {path} is not a sosreport directory or tarball", file=sys.stderr)
+        print(f"Error: {path} is not a sosreport", file=sys.stderr)
         sys.exit(2)
 
     mode, sb_state, evidence, rc = detect(reader)
@@ -266,11 +333,6 @@ def main():
             print("\nEvidence:")
             for e in evidence:
                 print(f"  - {e}")
-
-    if mode == "Unknown":
-        print("\nHints:")
-        print("  * Ensure sos collected: efibootmgr, mount -l, dmesg, and ls of /sys/firmware")
-        print("  * /boot/efi alone is a weak indicator; efivarfs or EFI dmesg lines are authoritative.")
 
     sys.exit(rc)
 
