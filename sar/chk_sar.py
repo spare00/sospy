@@ -146,8 +146,7 @@ def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
     with open(filepath, "r") as f:
         raw_lines = f.readlines()
 
-    if verbose:
-        print(f"Reading SAR file: {filepath}")
+    print(f"Reading SAR file: {filepath}\n")
 
     segments = []
     current_segment = []
