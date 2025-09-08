@@ -426,6 +426,39 @@ def show_processes_for_module(process_module_pages, module_name, unit, top_n=10)
     print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {unit_label}")
     print("=" * 50)
 
+def show_modules_breakdown(process_data, process_module_pages, top_n=10):
+    """-p -m: show per-process module vs non-module memory usage."""
+    proc_rows = []
+    total_mod = total_non = 0.0
+
+    for proc, st in process_data.items():
+        total_pages = st['pages']
+        # Sum module-attributed pages for this process
+        mod_pages = sum(stats['pages'] for (p, _), stats in process_module_pages.items() if p == proc)
+        non_pages = total_pages - mod_pages
+
+        mod_g = (mod_pages * 4) / (1024 * 1024)
+        non_g = (non_pages * 4) / (1024 * 1024)
+        tot_g = mod_g + non_g
+
+        proc_rows.append((proc, mod_g, non_g, tot_g))
+        total_mod += mod_g
+        total_non += non_g
+
+    # Sort by total usage, take top_n
+    proc_rows.sort(key=lambda x: x[3], reverse=True)
+    top_rows = proc_rows[:top_n]
+
+    # Print
+    print("Top 10 Processes:")
+    print("=" * 50)
+    print(f"{'Application':<20}{'Modules (G)':>18}{'Non Modules (G)':>20}{'Total (G)':>16}")
+    print("-" * 80)
+    for proc, mod_g, non_g, tot_g in top_rows:
+        print(f"{proc:<20}{mod_g:>18.2f}{non_g:>20.2f}{tot_g:>16.2f}")
+    print("-" * 80)
+    print(f"{'Total':<20}{total_mod:>18.2f}{total_non:>20.2f}{(total_mod+total_non):>16.2f}")
+
 def show_skipped(skipped_allocations, verbose=False):
     if not verbose:
         return
@@ -549,7 +582,42 @@ def main():
     # Fast pre-scan to detect dump kind to gate -p and -s (both require Type-2)
     dump_kind = quick_detect_dump_kind(args.file, max_lines=args.detect_lines)
 
-    # Fast totals-only path
+    # Helper: do we have any non-process reports requested?
+    # (Totals, plain modules table when -m is used WITHOUT -p, or calltraces)
+    non_process_reports = (
+        args.total or
+        (args.modules and not args.processes) or
+        args.calltraces
+    )
+
+
+    # If -p is present, enforce type gating first to avoid long waits on Type-1
+    if args.processes and dump_kind == 'type1':
+        # Process-dependent requests (anything that needs per-process attribution)
+        process_dependent_only = (
+            args.processes and
+            # No non-process reports are requested
+            not non_process_reports
+        )
+        if process_dependent_only:
+            # Examples: -p ; -p -s ; -p -m ; -p -s -m
+            print("Process views (-p) require a Type-2 dump with process metadata. Skipping full parse.")
+            return
+        else:
+            # We have other non-process reports to produce; disable all process-based views
+            print("Process views (-p) require Type-2; will skip process-based outputs.")
+            args.processes = False
+            # Also disable -s because slab-by-process requires Type-2
+            if args.slabs:
+                print("Slab view (-s) requires Type-2; skipping slab outputs.")
+                args.slabs = False
+
+    # If -s (without -p) was requested on Type-1, skip it early as well
+    if args.slabs and not args.processes and dump_kind == 'type1':
+        print("Slab view (-s): Requires Type-2 dump with process metadata. Skipping.")
+        args.slabs = False
+
+    # Fast totals-only path stays the same (can short-circuit before full parse)
     only_totals = args.total and not (args.processes or args.modules or args.slabs or args.calltraces)
     if only_totals:
         if args.verbose:
@@ -560,17 +628,6 @@ def main():
             show_totals_verbose(order_stats)
         else:
             show_totals(order_stats)
-        return
-
-    # If -p only and Type-1, skip full parse
-    only_process_view = args.processes and not (args.modules or args.slabs or args.calltraces or args.total)
-    if only_process_view and dump_kind == 'type1':
-        print("Process view (-p): No process metadata found in this dump (Type-1). Skipping full parse.")
-        return
-
-    # If -s requested and file is Type-1, skip (slab-by-process needs Type-2)
-    if args.slabs and dump_kind == 'type1':
-        print("Slab view (-s): Requires Type-2 dump with process metadata. Skipping.")
         return
 
     if args.verbose:
@@ -584,35 +641,39 @@ def main():
         args.file, args.debug, strict=args.strict
     )
 
-    # Totals (if requested together with others)
-    if args.total:
-        if args.verbose:
-            show_totals_verbose(order_stats)
-        else:
-            show_totals(order_stats)
-
-    # Modules report
-    if args.modules:
+    # --- Modules report (only when -m is used without -p or -s)
+    if args.modules and not args.processes and not args.slabs:
         show_top(module_data, "Modules", unit)
 
     # Slabs report (Type-2 only behavior)
-    if args.slabs:
+    if args.slabs and not args.processes:
         if not has_process_metadata:
             print("Slab view (-s): Requires Type-2 dump with process metadata.")
         else:
-            if args.processes:
-                show_slab_breakdown(proc_slab_stats, top_n=10)
-            else:
-                show_slab_by_process(proc_slab_stats, unit)
+            # -s only : slab-only usage per process (Top 10)
+            show_slab_by_process(proc_slab_stats, unit, top_n=10)
 
-    # Processes report (standard)
-    if args.processes and not args.slabs:
-        if args.filter_module:
-            show_processes_for_module(process_module_pages, args.filter_module, unit)
-        else:
+    # --- Processes report
+    if args.processes:
+        if args.slabs:
+            # -p -s: slab vs non-slab per process
+            if not has_process_metadata:
+                print("Slab view (-s): Requires Type-2 dump with process metadata.")
+            else:
+                show_slab_breakdown(proc_slab_stats, top_n=10)
+        elif args.modules:
+            # -p -m: modules vs non-modules per process
             if not has_process_metadata:
                 print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-            show_top(process_data, "Processes", unit)
+            show_modules_breakdown(process_data, process_module_pages, top_n=10)
+        else:
+            # plain -p
+            if args.filter_module:
+                show_processes_for_module(process_module_pages, args.filter_module, unit)
+            else:
+                if not has_process_metadata:
+                    print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
+                show_top(process_data, "Processes", unit)
 
     # Call traces
     if args.calltraces:
