@@ -74,6 +74,9 @@ def parse_page_owner(filename, debug=False, strict=False):
     calltrace_index = {}
     skipped_allocations = {'missing_match': 0, 'incomplete_trace': 0, 'invalid_order': 0}
 
+    # New: per-order stats for -t
+    order_stats = defaultdict(lambda: {'allocs': 0, 'pages': 0})
+
     allocations = []
     current_allocation = {}
     current_calltrace = []
@@ -118,12 +121,17 @@ def parse_page_owner(filename, debug=False, strict=False):
         if not in_trace or 'order' not in current_allocation:
             return
 
-        pages = 1 << current_allocation.get('order', 0)
+        order = current_allocation.get('order', 0)
+        pages = 1 << order
         process_name = current_allocation.get('process', 'Unknown')
 
         # Process totals use the real size
         process_data[process_name]['allocs'] += 1
         process_data[process_name]['pages'] += pages
+
+        # Track per-order stats for -t
+        order_stats[order]['allocs'] += 1
+        order_stats[order]['pages'] += pages
 
         # Parse frames
         frames = [_parse_frame(l) for l in current_calltrace]
@@ -272,7 +280,7 @@ def parse_page_owner(filename, debug=False, strict=False):
 
     return (process_data, module_data, slab_data, calltrace_data, calltrace_index,
             process_module_pages, total_allocs, skipped_allocations,
-            valid_allocation_detected, has_process_metadata, allocations)
+            valid_allocation_detected, has_process_metadata, allocations, order_stats)
 
 def convert_pages(pages, unit):
     kb = pages * 4
@@ -376,6 +384,34 @@ def show_skipped(skipped_allocations, verbose=False):
     for reason, count in skipped_allocations.items():
         print(f" - {reason.replace('_', ' ').capitalize()}: {count}")
 
+def show_totals(order_stats):
+    """Print the -t summary (and -v per-order breakdown handled in main)."""
+    total_allocs = sum(v['allocs'] for v in order_stats.values())
+    total_pages = sum(v['pages'] for v in order_stats.values())
+    total_gb = (total_pages * 4) / (1024 * 1024)
+    print("Summary:")
+    print("====================")
+    print(f"Total Allocations: {total_allocs}")
+    print(f"Total Memory (GB): {total_gb:.2f}")
+
+def show_totals_verbose(order_stats):
+    """Print the verbose per-order breakdown for -t -v."""
+    print("Summary:")
+    print("====================")
+    print(f"{'Order':<13}{'Allocations':>15}{'Memory (G)':>16}")
+    print("========================================")
+    for order in sorted(order_stats.keys()):
+        allocs = order_stats[order]['allocs']
+        pages = order_stats[order]['pages']
+        gb = (pages * 4) / (1024 * 1024)
+        print(f"{order:<13}{allocs:>15}{gb:>14.2f} GB")
+    print("====================")
+    total_allocs = sum(v['allocs'] for v in order_stats.values())
+    total_pages = sum(v['pages'] for v in order_stats.values())
+    total_gb = (total_pages * 4) / (1024 * 1024)
+    print(f"Total Allocations: {total_allocs}")
+    print(f"Total Memory (GB): {total_gb:.2f}")
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze large page_owner file.")
     parser.add_argument("file", help="Path to the page_owner file")
@@ -388,6 +424,7 @@ def main():
     parser.add_argument("-m", "--modules", action="store_true", help="Show top memory-using modules")
     parser.add_argument("-s", "--slabs", action="store_true", help="Show top memory-using slab allocators")
     parser.add_argument("-c", "--calltraces", action="store_true", help="Show top 5 call trace patterns")
+    parser.add_argument("-t", "--total", action="store_true", help="Show only total allocations/memory (with -v, also per-order breakdown)")
     parser.add_argument("--calltrace-process", type=str, help="Show call traces only for this process")
     parser.add_argument("--filter-module", type=str, help="Show top processes using this module")
     parser.add_argument("--strict", action="store_true", help="Attribute only when a module-tagged frame at/under the first allocator looks allocation-like (e.g., vx_alloc, getblk, new_*)")
@@ -395,8 +432,9 @@ def main():
     args = parser.parse_args()
     unit = args.unit or 'G'
 
-    if not (args.processes or args.modules or args.slabs or args.calltraces):
-        args.modules = True
+    # Default to total if *no* report option is set
+    if not (args.processes or args.modules or args.slabs or args.calltraces or args.modules):
+        args.total = True
 
     if args.calltrace_process and not args.calltraces:
         print("Error: '--calltrace-process' requires '-c' or '--calltraces' to be specified.")
@@ -407,7 +445,7 @@ def main():
         return
 
     # Fast pre-scan to detect dump kind and avoid full parse if only -p is requested and file is type1
-    only_process_view = args.processes and not (args.modules or args.slabs or args.calltraces)
+    only_process_view = args.processes and not (args.modules or args.slabs or args.calltraces or args.total)
     dump_kind = quick_detect_dump_kind(args.file, max_lines=args.detect_lines)
 
     if only_process_view:
@@ -415,7 +453,6 @@ def main():
             print("Process view (-p): No process metadata found in this dump (Type-1). Skipping full parse.")
             return
         elif dump_kind == 'unknown':
-            # Could not tell quickly; keep going (might still be type2 deeper in the file)
             if args.verbose:
                 print(f"Dump kind detection is inconclusive after {args.detect_lines} lines; proceeding to parse.")
 
@@ -425,9 +462,17 @@ def main():
 
     (process_data, module_data, slab_data, calltrace_data, calltrace_index,
      process_module_pages, total_allocs, skipped_allocations,
-     valid_allocation_detected, has_process_metadata, allocations) = parse_page_owner(
+     valid_allocation_detected, has_process_metadata, allocations, order_stats) = parse_page_owner(
         args.file, args.debug, strict=args.strict
     )
+
+    # -t / --total: only totals summary (with -v, per-order breakdown)
+    if args.total:
+        if args.verbose:
+            show_totals_verbose(order_stats)
+        else:
+            show_totals(order_stats)
+        return
 
     if args.processes:
         if args.filter_module:
