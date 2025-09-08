@@ -27,6 +27,18 @@ ALLOCATOR_FUNC_RE = re.compile(
     re.IGNORECASE
 )
 
+# Subset: slab allocator functions (used to classify slab vs non-slab)
+SLAB_ALLOCATOR_FUNC_RE = re.compile(
+    r'\b('
+    r'kmem_cache_(?:alloc|zalloc)(?:_node)?|'
+    r'k(?:m|vz|vm)alloc(?:_node)?|kzalloc(?:_node)?|kmalloc(?:_node)?|'
+    r'kmalloc_array|kcalloc|'
+    r'__kmalloc(?:_node|_track_caller)?|'
+    r'(?:__)?slab_alloc|___slab_alloc|allocate_slab'
+    r')\b',
+    re.IGNORECASE
+)
+
 # Module-local function names that look like an allocation by that module.
 # Lookarounds so underscores count as boundaries (Python \b treats '_' as word char).
 MODULE_ALLOC_LIKE_RE = re.compile(
@@ -42,6 +54,10 @@ HDR_WITH_PID_RE = re.compile(
 )
 HDR_ANY_RE = re.compile(
     r"^Page\s+allocated\s+via\s+order\s+\d+,\s*mask\s+0x[0-9a-fA-F]"
+)
+
+ALLOC_HEADER_ORDER_RE = re.compile(
+    r"^Page\s+allocated\s+via\s+order\s+(\d+),\s*mask\s+0x[0-9a-fA-F]+"
 )
 
 def quick_detect_dump_kind(path, max_lines=5000):
@@ -65,17 +81,41 @@ def quick_detect_dump_kind(path, max_lines=5000):
         return 'unknown'
     return 'type1' if saw_any else 'unknown'
 
+def parse_totals_only(path):
+    """
+    Super-fast path for -t only: just count allocations and pages per order.
+    Ignores stacks entirely.
+    """
+    order_stats = defaultdict(lambda: {'allocs': 0, 'pages': 0})
+    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+        for raw in f:
+            line = raw.strip()
+            m = ALLOC_HEADER_ORDER_RE.match(line)
+            if not m:
+                continue
+            try:
+                order = int(m.group(1))
+            except ValueError:
+                continue
+            pages = 1 << order
+            order_stats[order]['allocs'] += 1
+            order_stats[order]['pages'] += pages
+    return order_stats
+
 def parse_page_owner(filename, debug=False, strict=False):
     process_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     module_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})  # exactly one module per allocation (or none)
-    slab_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
+    slab_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})    # kept for completeness
     process_module_pages = defaultdict(lambda: {'pages': 0, 'allocs': 0})
     calltrace_data = defaultdict(lambda: {'count': 0, 'pages': 0})
     calltrace_index = {}
     skipped_allocations = {'missing_match': 0, 'incomplete_trace': 0, 'invalid_order': 0}
 
-    # New: per-order stats for -t
+    # Per-order stats for totals (-t)
     order_stats = defaultdict(lambda: {'allocs': 0, 'pages': 0})
+
+    # Per-process slab vs non-slab stats (Type-2 meaningful)
+    proc_slab_stats = defaultdict(lambda: {'slab_pages': 0, 'non_slab_pages': 0, 'slab_allocs': 0, 'non_slab_allocs': 0})
 
     allocations = []
     current_allocation = {}
@@ -83,25 +123,22 @@ def parse_page_owner(filename, debug=False, strict=False):
     in_trace = False
     total_allocs = 0
     valid_allocation_detected = False
-    has_process_metadata = False
+    has_process_metadata = False  # becomes True if any type2 header seen
 
     def _is_module_token(tok: str) -> bool:
         t = tok.strip()
         if not t:
             return False
-        # Ignore address-like tokens like [<ffffffff...>]
         if '<' in t or '>' in t:
             return False
         if re.fullmatch(r'0x[0-9A-Fa-f]+', t):
             return False
         if re.fullmatch(r'[0-9A-Fa-f]+', t):
             return False
-        # Typical module names
         return bool(re.fullmatch(r'[A-Za-z0-9_\-\.]+', t))
 
     def _parse_frame(line: str):
         """Return (func_name, module_name_or_None)."""
-        # Extract module at end in [module]
         mod_match = re.findall(r'\[([^\]]+)\]', line)
         module = None
         if mod_match:
@@ -109,7 +146,6 @@ def parse_page_owner(filename, debug=False, strict=False):
                 if _is_module_token(tok):
                     module = tok.strip()
                     break
-        # Remove leading [<addr>] and get function before '+'
         s = re.sub(r'^\s*\[[^]]+\]\s*', '', line)
         func = s.split('+', 1)[0].strip()
         if not func:
@@ -125,29 +161,52 @@ def parse_page_owner(filename, debug=False, strict=False):
         pages = 1 << order
         process_name = current_allocation.get('process', 'Unknown')
 
-        # Process totals use the real size
+        # Process totals
         process_data[process_name]['allocs'] += 1
         process_data[process_name]['pages'] += pages
 
-        # Track per-order stats for -t
+        # Totals per-order
         order_stats[order]['allocs'] += 1
         order_stats[order]['pages'] += pages
 
         # Parse frames
         frames = [_parse_frame(l) for l in current_calltrace]
 
-        # Find the first generic allocator frame (closest to top)
+        # First allocator frame
         alloc_idx = None
         for i, (func, _mod) in enumerate(frames):
             if ALLOCATOR_FUNC_RE.search(func):
                 alloc_idx = i
                 break
 
-        attributed_module = None
+	# Slab classification (prefer slab if any slab allocator appears in the trace)
+	# Option A: simplest & robust — if any slab allocator exists, treat as slab
+        is_slab_alloc = any(SLAB_ALLOCATOR_FUNC_RE.search(func) for func, _ in frames)
 
+	# Option B (more conservative): slab only if a slab allocator appears at/above the first generic allocator
+	# is_slab_alloc = False
+	# if alloc_idx is not None:
+	#     for i, (func, _mod) in enumerate(frames[:alloc_idx+1]):
+	#         if SLAB_ALLOCATOR_FUNC_RE.search(func):
+	#             is_slab_alloc = True
+	#             break
+	# else:
+	#     # If we didn't detect a generic allocator but still see a slab frame, treat as slab
+	#     is_slab_alloc = any(SLAB_ALLOCATOR_FUNC_RE.search(func) for func, _ in frames)
+
+        # Per-process slab/non-slab (meaningful with type2 process names)
+        if process_name != 'Unknown':
+            if is_slab_alloc:
+                proc_slab_stats[process_name]['slab_pages'] += pages
+                proc_slab_stats[process_name]['slab_allocs'] += 1
+            else:
+                proc_slab_stats[process_name]['non_slab_pages'] += pages
+                proc_slab_stats[process_name]['non_slab_allocs'] += 1
+
+        # Module attribution
+        attributed_module = None
         if alloc_idx is not None:
             if strict:
-                # STRICT: attribute only if a module-tagged frame at/under allocator looks alloc-like
                 func0, mod0 = frames[alloc_idx]
                 if mod0 and MODULE_ALLOC_LIKE_RE.search(func0):
                     attributed_module = mod0
@@ -157,9 +216,7 @@ def parse_page_owner(filename, debug=False, strict=False):
                         if modj and MODULE_ALLOC_LIKE_RE.search(funcj):
                             attributed_module = modj
                             break
-                # If not found, leave unattributed in strict mode
             else:
-                # NON-STRICT: nearest module at/under allocator
                 _func0, mod0 = frames[alloc_idx]
                 if mod0:
                     attributed_module = mod0
@@ -170,38 +227,34 @@ def parse_page_owner(filename, debug=False, strict=False):
                             attributed_module = modj
                             break
         else:
-            # No allocator found: only non-strict falls back
             if not strict:
                 for _func, m in frames:
                     if m:
                         attributed_module = m
                         break
 
-        # Record slab-ish call sites (independent of module attribution)
+        # (Optional) slab-ish functions record
         for func, _ in frames:
             if re.search(r'kmalloc|slab|cache|kfree', func, re.IGNORECASE):
                 slab_data[func]['allocs'] += 1
                 slab_data[func]['pages'] += pages
 
-        # Attribute full allocation to exactly one module (if found)
+        # Apply module attribution
         if attributed_module:
             module_data[attributed_module]['allocs'] += 1
             module_data[attributed_module]['pages'] += pages
             process_module_pages[(process_name, attributed_module)]['pages'] += pages
             process_module_pages[(process_name, attributed_module)]['allocs'] += 1
 
-        # Group by call trace hash
+        # Call trace grouping
         trace_str = "\n".join(current_calltrace)
         trace_key = hashlib.sha256(trace_str.encode()).hexdigest()
         current_allocation['trace_key'] = trace_key
         current_allocation['pages'] = pages
-
         if trace_key not in calltrace_index:
             calltrace_index[trace_key] = current_calltrace.copy()
-
         calltrace_data[trace_key]['count'] += 1
         calltrace_data[trace_key]['pages'] += pages
-
         allocations.append({"process": process_name, "trace_key": trace_key, "pages": pages})
 
         total_allocs += 1
@@ -218,7 +271,6 @@ def parse_page_owner(filename, debug=False, strict=False):
                     finalize_current()
 
                 valid_allocation_detected = True
-                # type2: includes pid/tgid/comm/ts (ts may end in ' ns')
                 m2 = re.search(r"order (\d+), mask .*?, pid (\d+), tgid (\d+) \((.*?)\), ts (\d+)(?:\s*ns)?", line)
                 if m2:
                     try:
@@ -238,7 +290,6 @@ def parse_page_owner(filename, debug=False, strict=False):
                     in_trace = True
                     current_calltrace = []
                 else:
-                    # type1: without pid/tgid/comm/ts
                     m1 = re.search(r"order (\d+), mask", line)
                     if m1:
                         try:
@@ -261,7 +312,6 @@ def parse_page_owner(filename, debug=False, strict=False):
                         in_trace = False
 
             elif line.startswith("PFN"):
-                # PFN/Flags line ignored for these summaries
                 pass
 
             elif in_trace and line:
@@ -275,12 +325,12 @@ def parse_page_owner(filename, debug=False, strict=False):
                     skipped_allocations['incomplete_trace'] += 1
                 in_trace = False
 
-        # EOF finalization
         finalize_current()
 
     return (process_data, module_data, slab_data, calltrace_data, calltrace_index,
             process_module_pages, total_allocs, skipped_allocations,
-            valid_allocation_detected, has_process_metadata, allocations, order_stats)
+            valid_allocation_detected, has_process_metadata, allocations,
+            order_stats, proc_slab_stats)
 
 def convert_pages(pages, unit):
     kb = pages * 4
@@ -385,7 +435,6 @@ def show_skipped(skipped_allocations, verbose=False):
         print(f" - {reason.replace('_', ' ').capitalize()}: {count}")
 
 def show_totals(order_stats):
-    """Print the -t summary (and -v per-order breakdown handled in main)."""
     total_allocs = sum(v['allocs'] for v in order_stats.values())
     total_pages = sum(v['pages'] for v in order_stats.values())
     total_gb = (total_pages * 4) / (1024 * 1024)
@@ -395,7 +444,6 @@ def show_totals(order_stats):
     print(f"Total Memory (GB): {total_gb:.2f}")
 
 def show_totals_verbose(order_stats):
-    """Print the verbose per-order breakdown for -t -v."""
     print("Summary:")
     print("====================")
     print(f"{'Order':<13}{'Allocations':>15}{'Memory (G)':>16}")
@@ -412,6 +460,58 @@ def show_totals_verbose(order_stats):
     print(f"Total Allocations: {total_allocs}")
     print(f"Total Memory (GB): {total_gb:.2f}")
 
+def show_slab_by_process(proc_slab_stats, unit, top_n=10):
+    """-s (Type-2 only): slab-only usage per process, top N by slab memory."""
+    rows = [(proc, stats) for proc, stats in proc_slab_stats.items() if stats['slab_pages'] > 0]
+    rows.sort(key=lambda x: x[1]['slab_pages'], reverse=True)
+
+    # Totals over all processes
+    total_allocs = sum(st['slab_allocs'] for _, st in rows)
+    total_pages = sum(st['slab_pages'] for _, st in rows)
+
+    # Header
+    print("Top 10 Processes:")
+    print("=" * 50)
+    print(f"{'Application':<20}{'Allocations':>15}{'Memory (G)':>15}")
+    print("-" * 50)
+
+    # Top N only
+    for proc, st in rows[:top_n]:
+        mem_gb = (st['slab_pages'] * 4) / (1024 * 1024)
+        print(f"{proc:<20}{st['slab_allocs']:>15}{mem_gb:>15.2f} GB")
+
+    # Footer total
+    total_mem_gb = (total_pages * 4) / (1024 * 1024)
+    print("-" * 50)
+    print(f"{'Total':<20}{total_allocs:>15}{total_mem_gb:>15.2f} GB")
+
+def show_slab_breakdown(proc_slab_stats, top_n=10):
+    """-s -p (Type-2 only): slab vs non-slab per process, top N by total."""
+    # Build rows
+    rows = []
+    total_slab = total_non = 0.0
+    for proc, st in proc_slab_stats.items():
+        slab_g = (st['slab_pages'] * 4) / (1024 * 1024)
+        non_g  = (st['non_slab_pages'] * 4) / (1024 * 1024)
+        tot_g  = slab_g + non_g
+        rows.append((proc, slab_g, non_g, tot_g))
+        total_slab += slab_g
+        total_non  += non_g
+
+    # Sort by total desc and take top_n
+    rows.sort(key=lambda x: x[3], reverse=True)
+    top_rows = rows[:top_n]
+
+    # Print header exactly as expected
+    print("Top 10 Processes:")
+    print("=" * 50)
+    print(f"{'Application':<20}{'Slabs (G)':>18}{'Non Slabs (G)':>20}{'Total (G)':>16}")
+    print("-" * 80)
+    for proc, slab_g, non_g, tot_g in top_rows:
+        print(f"{proc:<20}{slab_g:>18.2f}{non_g:>20.2f}{tot_g:>16.2f}")
+    print("-" * 80)
+    print(f"{'Total':<20}{total_slab:>18.2f}{total_non:>20.2f}{(total_slab+total_non):>16.2f}")
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze large page_owner file.")
     parser.add_argument("file", help="Path to the page_owner file")
@@ -420,9 +520,9 @@ def main():
     parser.add_argument("-M", dest="unit", action="store_const", const='M', help="Show in MB")
     parser.add_argument("-K", dest="unit", action="store_const", const='K', help="Show in KB")
     parser.add_argument("-G", dest="unit", action="store_const", const='G', help="Show in GB")
-    parser.add_argument("-p", "--processes", action="store_true", help="Show top memory-using processes")
+    parser.add_argument("-p", "--processes", action="store_true", help="Process report (varies by mode)")
     parser.add_argument("-m", "--modules", action="store_true", help="Show top memory-using modules")
-    parser.add_argument("-s", "--slabs", action="store_true", help="Show top memory-using slab allocators")
+    parser.add_argument("-s", "--slabs", action="store_true", help="Show slab usage by process (Type-2 only). With -p, show slab vs non-slab breakdown")
     parser.add_argument("-c", "--calltraces", action="store_true", help="Show top 5 call trace patterns")
     parser.add_argument("-t", "--total", action="store_true", help="Show only total allocations/memory (with -v, also per-order breakdown)")
     parser.add_argument("--calltrace-process", type=str, help="Show call traces only for this process")
@@ -432,9 +532,11 @@ def main():
     args = parser.parse_args()
     unit = args.unit or 'G'
 
-    # Default to total if *no* report option is set
-    if not (args.processes or args.modules or args.slabs or args.calltraces or args.modules):
+    # Default to totals if no report option is set
+    if not (args.processes or args.modules or args.slabs or args.calltraces or args.total):
         args.total = True
+        if args.verbose:
+            print("No report option specified; defaulting to totals (-t).")
 
     if args.calltrace_process and not args.calltraces:
         print("Error: '--calltrace-process' requires '-c' or '--calltraces' to be specified.")
@@ -444,17 +546,32 @@ def main():
         print("Error: '--filter-module' requires '-p' or '--processes' to be specified.")
         return
 
-    # Fast pre-scan to detect dump kind and avoid full parse if only -p is requested and file is type1
-    only_process_view = args.processes and not (args.modules or args.slabs or args.calltraces or args.total)
+    # Fast pre-scan to detect dump kind to gate -p and -s (both require Type-2)
     dump_kind = quick_detect_dump_kind(args.file, max_lines=args.detect_lines)
 
-    if only_process_view:
-        if dump_kind == 'type1':
-            print("Process view (-p): No process metadata found in this dump (Type-1). Skipping full parse.")
-            return
-        elif dump_kind == 'unknown':
-            if args.verbose:
-                print(f"Dump kind detection is inconclusive after {args.detect_lines} lines; proceeding to parse.")
+    # Fast totals-only path
+    only_totals = args.total and not (args.processes or args.modules or args.slabs or args.calltraces)
+    if only_totals:
+        if args.verbose:
+            kind_msg = f"Detected dump kind: {dump_kind}" if dump_kind != 'unknown' else "Dump kind: unknown"
+            print(f"Analyzing {args.file} (totals only). {kind_msg}")
+        order_stats = parse_totals_only(args.file)
+        if args.verbose:
+            show_totals_verbose(order_stats)
+        else:
+            show_totals(order_stats)
+        return
+
+    # If -p only and Type-1, skip full parse
+    only_process_view = args.processes and not (args.modules or args.slabs or args.calltraces or args.total)
+    if only_process_view and dump_kind == 'type1':
+        print("Process view (-p): No process metadata found in this dump (Type-1). Skipping full parse.")
+        return
+
+    # If -s requested and file is Type-1, skip (slab-by-process needs Type-2)
+    if args.slabs and dump_kind == 'type1':
+        print("Slab view (-s): Requires Type-2 dump with process metadata. Skipping.")
+        return
 
     if args.verbose:
         kind_msg = f"Detected dump kind: {dump_kind}" if dump_kind != 'unknown' else "Dump kind: unknown"
@@ -462,19 +579,34 @@ def main():
 
     (process_data, module_data, slab_data, calltrace_data, calltrace_index,
      process_module_pages, total_allocs, skipped_allocations,
-     valid_allocation_detected, has_process_metadata, allocations, order_stats) = parse_page_owner(
+     valid_allocation_detected, has_process_metadata, allocations,
+     order_stats, proc_slab_stats) = parse_page_owner(
         args.file, args.debug, strict=args.strict
     )
 
-    # -t / --total: only totals summary (with -v, per-order breakdown)
+    # Totals (if requested together with others)
     if args.total:
         if args.verbose:
             show_totals_verbose(order_stats)
         else:
             show_totals(order_stats)
-        return
 
-    if args.processes:
+    # Modules report
+    if args.modules:
+        show_top(module_data, "Modules", unit)
+
+    # Slabs report (Type-2 only behavior)
+    if args.slabs:
+        if not has_process_metadata:
+            print("Slab view (-s): Requires Type-2 dump with process metadata.")
+        else:
+            if args.processes:
+                show_slab_breakdown(proc_slab_stats, top_n=10)
+            else:
+                show_slab_by_process(proc_slab_stats, unit)
+
+    # Processes report (standard)
+    if args.processes and not args.slabs:
         if args.filter_module:
             show_processes_for_module(process_module_pages, args.filter_module, unit)
         else:
@@ -482,18 +614,12 @@ def main():
                 print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
             show_top(process_data, "Processes", unit)
 
-    if args.modules:
-        show_top(module_data, "Modules", unit)
-
-    if args.slabs:
-        show_top(slab_data, "Slab Functions", unit)
-
+    # Call traces
     if args.calltraces:
         process_to_traces = defaultdict(set)
         for alloc in allocations:
             if not args.calltrace_process or alloc['process'] == args.calltrace_process:
                 process_to_traces[alloc['process']].add(alloc['trace_key'])
-
         show_calltraces(
             calltrace_data, calltrace_index, unit,
             filter_by_process=args.calltrace_process,
