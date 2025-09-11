@@ -3,14 +3,16 @@
 chk_cg.py - Check for cgroup deviations from defaults inside a sosreport snapshot.
 
 Usage:
-  ./chk_cg.py [-v] [-d] [-u UNIT_PATTERN]
+  ./chk_cg.py [-v] [-d] [-u UNIT_PATTERN] [--no-color]
 
 Options:
   -v                 Verbose output (more details)
   -d                 Debug output (trace IO)
   -u UNIT_PATTERN    Filter by substring. If pattern looks like a specific
                      unit/slice (*.service|*.scope|*.slice), a detailed report
-                     for matching entries is printed.
+                     for matching entries is printed, incl. *origin of change*.
+  --no-color         Disable ANSI coloring (also auto-disables if stdout not TTY
+                     or if NO_COLOR is set)
 
 Notes:
   - Reads ONLY from the current directory (sosreport root).
@@ -20,6 +22,7 @@ Notes:
 
 import argparse
 import sys
+import os
 import re
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
@@ -28,6 +31,7 @@ from typing import Optional, Tuple, Dict, Any, List
 VERBOSE = False
 DEBUG = False
 UNIT_FILTER: Optional[str] = None
+USE_COLOR = True
 ROOT = Path(".").resolve()
 
 def vprint(*a, **k):
@@ -47,6 +51,21 @@ def looks_like_specific_unit(s: Optional[str]) -> bool:
     if not s:
         return False
     return s.endswith((".service", ".scope", ".slice"))
+
+# ---------------------- Color helpers ----------------------
+def _color(s: str, code: str) -> str:
+    if not USE_COLOR:
+        return s
+    return f"\033[{code}m{s}\033[0m"
+
+def c_green(s: str) -> str:
+    return _color(s, "32")  # green
+
+def c_yellow(s: str) -> str:
+    return _color(s, "33")  # yellow
+
+def changed_str(flag: bool) -> str:
+    return c_yellow("yes") if flag else c_green("no")
 
 # ---------------------- FS helpers ----------------------
 def exists(p: Path) -> bool:
@@ -76,31 +95,24 @@ def read_first_line(p: Path) -> Optional[str]:
 def human_bytes(n_str: Optional[str]) -> str:
     if n_str is None:
         return "unknown"
-    if n_str.lower() == "max":
+    if isinstance(n_str, str) and n_str.lower() == "max":
         return "unlimited"
     try:
         n = int(n_str)
     except Exception:
-        return n_str
-    # v1 "unlimited" often uses near-LLONG_MAX; treat very large as unlimited
-    if n >= (1 << 60):  # ~1 EiB
+        return str(n_str)
+    if n >= (1 << 60):  # treat absurdly large as unlimited in v1
         return "unlimited"
     units = ["B","KiB","MiB","GiB","TiB","PiB","EiB"]
-    val = float(n)
-    i = 0
+    val = float(n); i = 0
     while val >= 1024 and i < len(units)-1:
-        val /= 1024.0
-        i += 1
-    if val.is_integer():
-        return f"{int(val)} {units[i]}"
-    return f"{val:.2f} {units[i]}"
+        val /= 1024.0; i += 1
+    out = f"{val:.2f} {units[i]}"
+    return out.replace(".00","")
 
 def cpu_ratio_to_str(r: Optional[float]) -> str:
     if r is None:
         return "unlimited"
-    # r == number of CPUs allowed (e.g., 0.5 = half a CPU)
-    if abs(r - round(r, 3)) < 1e-9:
-        return f"{r:.3f} CPUs"
     return f"{r:.3f} CPUs"
 
 def yesno(b: bool) -> str:
@@ -149,7 +161,6 @@ def layered_systemd_defaults() -> Dict[str, Dict[str, Any]]:
     if exists(dropins_dir):
         for p in sorted(dropins_dir.glob("*.conf")):
             dropins.update(parse_systemd_conf(p))
-
     keys = set(vendor) | set(local) | set(dropins) | CONF_KEYS
     out: Dict[str, Dict[str, Any]] = {}
     for k in keys:
@@ -313,12 +324,54 @@ def walk_v1(root: Path) -> Dict[str, Dict[str, Any]]:
                     stack.append(sub)
     return results
 
+# ---------------------- "origin of change" helpers ----------------------
+def find_intro_v2(path: str, results: Dict[str, Dict[str, Any]], field: str) -> Tuple[str, Optional[str], Any, Any]:
+    if path not in results:
+        return path, None, None, None
+    node_val = results[path]["limits"].get(field)
+    cur = path
+    while True:
+        parent = results.get(cur, {}).get("parent")
+        if not parent or parent not in results:
+            return cur, parent, node_val, results.get(parent, {}).get("limits", {}).get(field) if parent else None
+        parent_val = results[parent]["limits"].get(field)
+        if parent_val == node_val:
+            cur = parent
+            continue
+        return cur, parent, node_val, parent_val
+
+def v1_effective_key(ctrl: str, limits: Dict[str, Any]) -> Any:
+    if ctrl == "cpu":
+        mode = limits.get("cpu.mode")
+        ratio = limits.get("cpu.ratio")
+        return ("cpu", mode, round(ratio, 12) if ratio is not None else None)
+    if ctrl == "memory":
+        return ("memory", limits.get("memory.limit_in_bytes"))
+    if ctrl == "pids":
+        return ("pids", limits.get("pids.max"))
+    return None
+
+def find_intro_v1(path_only: str, ctrl: str, results: Dict[str, Dict[str, Any]]) -> Tuple[str, Optional[str], Any, Any]:
+    key = f"{path_only}::{ctrl}"
+    if key not in results:
+        return path_only, None, None, None
+    node_tok = v1_effective_key(ctrl, results[key]["limits"])
+    cur = path_only
+    while True:
+        parent = results.get(f"{cur}::{ctrl}", {}).get("parent")
+        if not parent or f"{parent}::{ctrl}" not in results:
+            parent_tok = v1_effective_key(ctrl, results.get(f"{parent}::{ctrl}", {}).get("limits", {})) if parent else None
+            return cur, parent, node_tok, parent_tok
+        parent_tok = v1_effective_key(ctrl, results[f"{parent}::{ctrl}"]["limits"])
+        if parent_tok == node_tok:
+            cur = parent
+            continue
+        return cur, parent, node_tok, parent_tok
+
 # ---------------------- Detail printers ----------------------
 def print_v1_detailed_for_path(path_only: str, results: Dict[str, Dict[str, Any]]) -> None:
-    # We expect keys like "<path>::cpu", "<path>::memory", "<path>::pids"
     print("\n== Detailed limits for:", path_only)
-    controllers = ["cpu", "memory", "pids"]
-    for ctrl in controllers:
+    for ctrl in ["cpu", "memory", "pids"]:
         key = f"{path_only}::{ctrl}"
         if key not in results:
             continue
@@ -333,17 +386,19 @@ def print_v1_detailed_for_path(path_only: str, results: Dict[str, Dict[str, Any]
             p = limits.get("cpu.cfs_period_us")
             mode = limits.get("cpu.mode")
             ratio = limits.get("cpu.ratio")
-            print(f"   child: quota={q}, period={p}, mode={mode}, effective={cpu_ratio_to_str(ratio)}")
+            print(f"   child:  quota={q}, period={p}, mode={mode}, effective={cpu_ratio_to_str(ratio)}")
             if parent:
-                pkey = f"{parent}::{ctrl}"
-                plim = results.get(pkey, {}).get("limits", {})
+                plim = results.get(f"{parent}::{ctrl}", {}).get("limits", {})
                 pmode = plim.get("cpu.mode")
                 pratio = plim.get("cpu.ratio")
-                pq = plim.get("cpu.cfs_quota_us")
-                pp = plim.get("cpu.cfs_period_us")
+                pq = plim.get("cpu.cfs_quota_us"); pp = plim.get("cpu.cfs_period_us")
                 print(f"   parent: {parent}")
                 print(f"           quota={pq}, period={pp}, mode={pmode}, effective={cpu_ratio_to_str(pratio)}")
-            print(f"   changed: {yesno(diffs.get('cpu', False) or diffs.get('cpu.cfs_quota_us', False))}")
+            ch = (diffs.get('cpu', False) or diffs.get('cpu.cfs_quota_us', False))
+            print(f"   changed: {changed_str(ch)}")
+            intro, pintro, _, _ = find_intro_v1(path_only, "cpu", results)
+            if pintro:
+                print(f"   introduced at: {intro}  (parent {pintro})")
         elif ctrl == "memory":
             val = limits.get("memory.limit_in_bytes")
             print(f"   child:  limit={val} ({human_bytes(val)})")
@@ -352,10 +407,14 @@ def print_v1_detailed_for_path(path_only: str, results: Dict[str, Dict[str, Any]
                 pv = plim.get("memory.limit_in_bytes")
                 print(f"   parent: {parent}")
                 print(f"           limit={pv} ({human_bytes(pv)})")
-            print(f"   changed: {yesno(diffs.get('memory.limit_in_bytes', False))}")
+            ch = diffs.get('memory.limit_in_bytes', False)
+            print(f"   changed: {changed_str(ch)}")
+            intro, pintro, _, _ = find_intro_v1(path_only, "memory", results)
+            if pintro:
+                print(f"   introduced at: {intro}  (parent {pintro})")
         elif ctrl == "pids":
             val = limits.get("pids.max")
-            pretty = "unlimited" if (val is None or val.lower() == "max") else val
+            pretty = "unlimited" if (val is None or str(val).lower() == "max") else val
             print(f"   child:  pids.max={val} ({pretty})")
             if parent:
                 plim = results.get(f"{parent}::{ctrl}", {}).get("limits", {})
@@ -363,7 +422,11 @@ def print_v1_detailed_for_path(path_only: str, results: Dict[str, Dict[str, Any]
                 ppretty = "unlimited" if (pv is None or str(pv).lower() == "max") else pv
                 print(f"   parent: {parent}")
                 print(f"           pids.max={pv} ({ppretty})")
-            print(f"   changed: {yesno(diffs.get('pids.max', False))}")
+            ch = diffs.get('pids.max', False)
+            print(f"   changed: {changed_str(ch)}")
+            intro, pintro, _, _ = find_intro_v1(path_only, "pids", results)
+            if pintro:
+                print(f"   introduced at: {intro}  (parent {pintro})")
 
 def print_v2_detailed_for_path(path: str, results: Dict[str, Dict[str, Any]]) -> None:
     info = results.get(path)
@@ -373,15 +436,22 @@ def print_v2_detailed_for_path(path: str, results: Dict[str, Dict[str, Any]]) ->
     l = info["limits"]
     print("\n== Detailed limits for:", path)
     # memory
-    cm = l.get("memory.max"); print(f"-- memory --")
+    cm = l.get("memory.max")
+    print(f"-- memory --")
     print(f"   child:  memory.max={cm} ({human_bytes(cm)})")
     if parent:
         pl = results.get(parent, {}).get("limits", {})
-        pm = pl.get("memory.max"); print(f"   parent: {parent}")
+        pm = pl.get("memory.max")
+        print(f"   parent: {parent}")
         print(f"           memory.max={pm} ({human_bytes(pm)})")
-    print(f"   changed: {yesno(info['diff'].get('memory.max', False))}")
+    print(f"   changed: {changed_str(info['diff'].get('memory.max', False))}")
+    intro, pintro, _, _ = find_intro_v2(path, results, "memory.max")
+    if pintro:
+        print(f"   introduced at: {intro}  (parent {pintro})")
+
     # pids
-    cp = l.get("pids.max"); print(f"-- pids --")
+    cp = l.get("pids.max")
+    print(f"-- pids --")
     ppretty = "unlimited" if (cp is None or str(cp).lower() == "max") else cp
     print(f"   child:  pids.max={cp} ({ppretty})")
     if parent:
@@ -389,8 +459,12 @@ def print_v2_detailed_for_path(path: str, results: Dict[str, Dict[str, Any]]) ->
         pp = pl.get("pids.max")
         pppretty = "unlimited" if (pp is None or str(pp).lower() == "max") else pp
         print(f"   parent: {parent}")
-        print(f"           pids.max={pp} ({ppprety if 'ppprety' in locals() else pppretty})")
-    print(f"   changed: {yesno(info['diff'].get('pids.max', False))}")
+        print(f"           pids.max={pp} ({ppprety})")
+    print(f"   changed: {changed_str(info['diff'].get('pids.max', False))}")
+    intro, pintro, _, _ = find_intro_v2(path, results, "pids.max")
+    if pintro:
+        print(f"   introduced at: {intro}  (parent {pintro})")
+
     # cpu
     print(f"-- cpu --")
     print(f"   child:  cpu.max={l.get('cpu.max')} (effective {cpu_ratio_to_str(l.get('cpu.ratio'))})")
@@ -398,17 +472,24 @@ def print_v2_detailed_for_path(path: str, results: Dict[str, Dict[str, Any]]) ->
         pl = results.get(parent, {}).get("limits", {})
         print(f"   parent: {parent}")
         print(f"           cpu.max={pl.get('cpu.max')} (effective {cpu_ratio_to_str(pl.get('cpu.ratio'))})")
-    print(f"   changed: {yesno(info['diff'].get('cpu.max', False))}")
+    print(f"   changed: {changed_str(info['diff'].get('cpu.max', False))}")
+    intro, pintro, _, _ = find_intro_v2(path, results, "cpu.max")
+    if pintro:
+        print(f"   introduced at: {intro}  (parent {pintro})")
 
 # ---------------------- main ----------------------
 def main():
-    global VERBOSE, DEBUG, UNIT_FILTER
+    global VERBOSE, DEBUG, UNIT_FILTER, USE_COLOR
     ap = argparse.ArgumentParser(description="Check cgroup changes from defaults in sosreport")
     ap.add_argument("-v", action="store_true", help="Verbose")
     ap.add_argument("-d", action="store_true", help="Debug")
     ap.add_argument("-u", metavar="UNIT", help="Filter by substring in unit/slice path")
+    ap.add_argument("--no-color", action="store_true", help="Disable colored output")
     args = ap.parse_args()
     VERBOSE, DEBUG, UNIT_FILTER = args.v, args.d, args.u
+
+    # decide color usage
+    USE_COLOR = not args.no_color and sys.stdout.isatty() and (os.environ.get("NO_COLOR") is None)
 
     print("== chk_cg: cgroup change detector (sosreport mode) ==")
     cgv = detect_cgv(ROOT)
@@ -454,9 +535,7 @@ def main():
                 tags = [k for k, v in info["diff"].items() if v]
                 print(f"* {path} [{info['type']}] changed: {', '.join(tags)}")
                 if VERBOSE and not specific:
-                    parent_limits = {}
-                    if info.get("parent"):
-                        parent_limits = results.get(info["parent"], {}).get("limits", {})
+                    parent_limits = results.get(info.get("parent",""), {}).get("limits", {})
                     l = info["limits"]
                     if "memory.max" in tags:
                         print(f"    memory.max: {l.get('memory.max')} (parent {parent_limits.get('memory.max')})")
@@ -464,9 +543,7 @@ def main():
                         print(f"    pids.max:   {l.get('pids.max')} (parent {parent_limits.get('pids.max')})")
                     if "cpu.max" in tags:
                         print(f"    cpu.max:    {l.get('cpu.max')} (parent {parent_limits.get('cpu.max')}); ratios child={l.get('cpu.ratio')} parent={parent_limits.get('cpu.ratio')}")
-        # Detailed section if user targeted a specific unit/slice
         if specific:
-            # choose first exact matching path(s)
             targets = [p for p in results.keys() if UNIT_FILTER in p]
             for t in sorted(targets):
                 print_v2_detailed_for_path(t, results)
@@ -490,14 +567,11 @@ def main():
             print(msg + ".")
         else:
             for key, info in sorted(deviants):
-                ctrl = info["type"].split(":", 1)[-1]
                 tags = [k for k, v in info.get("diff", {}).items() if v]
                 print(f"* {key} changed: {', '.join(tags)}")
                 if VERBOSE and not looks_like_specific_unit(UNIT_FILTER):
                     print(f"    limits: {info['limits']} (parent: {info.get('parent')})")
-        # Detailed section if user targeted a specific unit/slice
         if specific:
-            # group keys by path
             paths = sorted({k.split("::",1)[0] for k in results if UNIT_FILTER in k})
             for path_only in paths:
                 print_v1_detailed_for_path(path_only, results)
