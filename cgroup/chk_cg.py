@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
 """
-chk_cg.py - Check for cgroup deviations from defaults in a sosreport snapshot.
+chk_cg.py - Check for cgroup deviations from defaults inside a sosreport snapshot.
 
 Usage:
-  ./chk_cg.py [-v] [-d]
+  ./chk_cg.py [-v] [-d] [-u UNIT_PATTERN]
 
-- Works offline against the CURRENT DIRECTORY (sosreport root).
-- Detects cgroup v2 (unified) and v1 hierarchies.
-- Compares unit/slice limits to their parent slice to flag overrides.
-- Also reports systemd manager default overrides from /etc/systemd/*.conf vs /usr/lib/systemd/*.conf
+Options:
+  -v                 Verbose output (more details)
+  -d                 Debug output (trace IO)
+  -u UNIT_PATTERN    Filter by substring. If pattern looks like a specific
+                     unit/slice (*.service|*.scope|*.slice), a detailed report
+                     for matching entries is printed.
 
-Flags:
-  -v  Verbose (show more per-unit details)
-  -d  Debug (show paths searched and fallbacks)
+Notes:
+  - Reads ONLY from the current directory (sosreport root).
+  - Supports cgroup v2 and v1 (cpu/memory/pids).
+  - Detects deviations by comparing each directory to ITS PARENT.
 """
+
 import argparse
-import os
 import sys
 import re
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any, List
 
-# ---------------------- Utility logging ----------------------
+# ---------------------- Globals ----------------------
 VERBOSE = False
 DEBUG = False
+UNIT_FILTER: Optional[str] = None
+ROOT = Path(".").resolve()
 
 def vprint(*a, **k):
     if VERBOSE:
@@ -33,18 +38,22 @@ def dprint(*a, **k):
     if DEBUG:
         print("[DBG]", *a, **k)
 
-# ---------------------- Filesystem helpers ----------------------
-ROOT = Path(".").resolve()
+def match_unit(path_str: str) -> bool:
+    if UNIT_FILTER is None:
+        return True
+    return UNIT_FILTER in path_str
 
-def read_first_line(p: Path) -> Optional[str]:
+def looks_like_specific_unit(s: Optional[str]) -> bool:
+    if not s:
+        return False
+    return s.endswith((".service", ".scope", ".slice"))
+
+# ---------------------- FS helpers ----------------------
+def exists(p: Path) -> bool:
     try:
-        with p.open("r", encoding="utf-8", errors="ignore") as f:
-            line = f.readline().strip()
-            dprint(f"read {p}: {line!r}")
-            return line
-    except Exception as e:
-        dprint(f"failed to read {p}: {e}")
-        return None
+        return p.exists()
+    except Exception:
+        return False
 
 def list_dirs(p: Path) -> List[Path]:
     try:
@@ -53,118 +62,120 @@ def list_dirs(p: Path) -> List[Path]:
         dprint(f"failed to list {p}: {e}")
         return []
 
-def exists(p: Path) -> bool:
+def read_first_line(p: Path) -> Optional[str]:
     try:
-        return p.exists()
+        with p.open("r", encoding="utf-8", errors="ignore") as f:
+            s = f.readline().strip()
+            dprint(f"read {p}: {s!r}")
+            return s
+    except Exception as e:
+        dprint(f"failed to read {p}: {e}")
+        return None
+
+# ---------------------- Utilities for pretty output ----------------------
+def human_bytes(n_str: Optional[str]) -> str:
+    if n_str is None:
+        return "unknown"
+    if n_str.lower() == "max":
+        return "unlimited"
+    try:
+        n = int(n_str)
     except Exception:
-        return False
+        return n_str
+    # v1 "unlimited" often uses near-LLONG_MAX; treat very large as unlimited
+    if n >= (1 << 60):  # ~1 EiB
+        return "unlimited"
+    units = ["B","KiB","MiB","GiB","TiB","PiB","EiB"]
+    val = float(n)
+    i = 0
+    while val >= 1024 and i < len(units)-1:
+        val /= 1024.0
+        i += 1
+    if val.is_integer():
+        return f"{int(val)} {units[i]}"
+    return f"{val:.2f} {units[i]}"
+
+def cpu_ratio_to_str(r: Optional[float]) -> str:
+    if r is None:
+        return "unlimited"
+    # r == number of CPUs allowed (e.g., 0.5 = half a CPU)
+    if abs(r - round(r, 3)) < 1e-9:
+        return f"{r:.3f} CPUs"
+    return f"{r:.3f} CPUs"
+
+def yesno(b: bool) -> str:
+    return "yes" if b else "no"
 
 # ---------------------- Detect cgroup version ----------------------
 def detect_cgv(root: Path) -> str:
-    # Try unified mount snapshot path from sosreport
-    cgr = root / "sys" / "fs" / "cgroup"
-    if exists(cgr / "cgroup.controllers"):
-        return "v2"
-    # Detect v1 by controller subdirs typical of sosreport
-    likely_v1 = ["cpu", "cpuacct", "memory", "pids"]
-    if any(exists(cgr / n) for n in likely_v1):
-        return "v1"
-    # sosreport variants: sometimes under 'cgroup' not /sys/fs/cgroup (older)
-    alt = root / "cgroup"
-    if exists(alt / "cgroup.controllers"):
-        return "v2"
-    if any(exists(alt / n) for n in likely_v1):
-        return "v1"
+    for base in (root / "sys" / "fs" / "cgroup", root / "cgroup"):
+        if exists(base / "cgroup.controllers"):
+            return "v2"
+        if any(exists(base / n) for n in ("cpu", "cpuacct", "memory", "pids")):
+            return "v1"
     return "unknown"
 
-# ---------------------- Systemd defaults parsing ----------------------
+# ---------------------- systemd manager defaults ----------------------
 CONF_KEYS = {
     "DefaultCPUAccounting",
     "DefaultMemoryAccounting",
     "DefaultTasksAccounting",
     "DefaultTasksMax",
-    "DefaultMemoryPressure",
-    "DefaultLimitNOFILE",
-    "DefaultLimitNPROC",
 }
 
-INI_SECTION_RE = re.compile(r"^\s*\[(.+?)\]\s*$")
-KEY_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9]+)\s*=\s*(.*?)\s*$")
+KEY_RE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9]+)\s*=\s*(.*?)\s*$")
 
 def parse_systemd_conf(path: Path) -> Dict[str, str]:
-    """
-    Parse a systemd-style INI and return keys of interest (CONF_KEYS).
-    Only top-level keys matter for system.conf.
-    """
     found: Dict[str, str] = {}
     if not exists(path):
         return found
-    current_section = None
     try:
         for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-            msec = INI_SECTION_RE.match(line)
-            if msec:
-                current_section = msec.group(1).strip()
+            m = KEY_RE.match(line)
+            if not m:
                 continue
-            mkey = KEY_RE.match(line)
-            if mkey:
-                key, val = mkey.group(1), mkey.group(2).strip()
-                if key in CONF_KEYS:
-                    found[key] = val
+            k, v = m.group(1), m.group(2).strip()
+            if k in CONF_KEYS:
+                found[k] = v
     except Exception as e:
-        dprint(f"parse_systemd_conf error for {path}: {e}")
+        dprint(f"parse_systemd_conf({path}): {e}")
     return found
 
 def layered_systemd_defaults() -> Dict[str, Dict[str, Any]]:
-    """
-    Compare manager defaults: /usr/lib/systemd/system.conf (vendor)
-    overlaid by /etc/systemd/system.conf and drop-ins.
-    Returns dict with 'vendor', 'etc', 'effective' values.
-    """
-    out: Dict[str, Dict[str, Any]] = {}
     vendor = parse_systemd_conf(ROOT / "usr" / "lib" / "systemd" / "system.conf")
     local = parse_systemd_conf(ROOT / "etc" / "systemd" / "system.conf")
-    # drop-ins
     dropins_dir = ROOT / "etc" / "systemd" / "system.conf.d"
     dropins: Dict[str, str] = {}
     if exists(dropins_dir):
         for p in sorted(dropins_dir.glob("*.conf")):
-            for k, v in parse_systemd_conf(p).items():
-                dropins[k] = v  # later files override earlier (lexicographic order)
+            dropins.update(parse_systemd_conf(p))
 
-    # build effective by overlay (vendor -> local -> dropins)
-    keys = set(vendor.keys()) | set(local.keys()) | set(dropins.keys()) | CONF_KEYS
+    keys = set(vendor) | set(local) | set(dropins) | CONF_KEYS
+    out: Dict[str, Dict[str, Any]] = {}
     for k in keys:
-        eff = vendor.get(k)
-        src = "vendor"
+        eff, src = vendor.get(k), "vendor"
         if k in local:
-            eff = local[k]
-            src = "etc"
+            eff, src = local[k], "etc"
         if k in dropins:
-            eff = dropins[k]
-            src = f"dropin:{src}"
-        out[k] = {"vendor": vendor.get(k), "etc": local.get(k), "dropin": dropins.get(k), "effective": eff, "source": src}
+            eff, src = dropins[k], f"dropin:{src}"
+        out[k] = {"vendor": vendor.get(k), "etc": local.get(k),
+                  "dropin": dropins.get(k), "effective": eff, "source": src}
     return out
 
-# ---------------------- Cgroup v2 analysis ----------------------
+# ---------------------- cgroup v2 ----------------------
 def parse_cpu_max(val: Optional[str]) -> Tuple[Optional[float], Optional[int], Optional[int], str]:
-    """
-    Return (ratio, quota, period, mode) where mode is 'max' or 'limit' or 'unknown'.
-    ratio = quota/period if limited; None if unlimited/unknown.
-    """
     if not val:
         return (None, None, None, "unknown")
-    parts = val.strip().split()
+    parts = val.split()
     if not parts:
         return (None, None, None, "unknown")
     if parts[0] == "max":
-        # Some kernels show 'max' or 'max <period>'
         period = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
         return (None, None, period, "max")
     try:
         quota = int(parts[0])
         period = int(parts[1]) if len(parts) > 1 else 100000
-        if period == 0:
+        if period <= 0:
             return (None, quota, period, "limit")
         return (quota/period, quota, period, "limit")
     except Exception:
@@ -186,256 +197,313 @@ def read_v2_limits(dirpath: Path) -> Dict[str, Any]:
     }
 
 def compare_v2(child: Dict[str, Any], parent: Dict[str, Any]) -> Dict[str, bool]:
-    """
-    Compare child to parent settings to decide if child deviates.
-    For memory.max and pids.max: any numeric vs parent's different string means deviation.
-    For cpu.max: compare modes/ratios.
-    """
-    diffs = {}
-    # memory
-    cm, pm = (child.get("memory.max") or ""), (parent.get("memory.max") or "")
-    if cm != pm:
-        diffs["memory.max"] = True
-    else:
-        diffs["memory.max"] = False
-    # pids
-    cp, pp = (child.get("pids.max") or ""), (parent.get("pids.max") or "")
-    if cp != pp:
-        diffs["pids.max"] = True
-    else:
-        diffs["pids.max"] = False
-    # cpu
-    cmode, pmode = child.get("cpu.mode"), parent.get("cpu.mode")
-    cr, pr = child.get("cpu.ratio"), parent.get("cpu.ratio")
-    if cmode != pmode:
+    diffs: Dict[str, bool] = {}
+    diffs["memory.max"] = (child.get("memory.max") != parent.get("memory.max"))
+    diffs["pids.max"] = (child.get("pids.max") != parent.get("pids.max"))
+    if child.get("cpu.mode") != parent.get("cpu.mode"):
         diffs["cpu.max"] = True
+    elif child.get("cpu.mode") == "limit":
+        cr, pr = child.get("cpu.ratio"), parent.get("cpu.ratio")
+        diffs["cpu.max"] = (cr is None) != (pr is None) or (cr is not None and pr is not None and abs(cr - pr) > 1e-9)
     else:
-        if cmode == "limit":
-            if cr is None or pr is None:
-                diffs["cpu.max"] = True
-            else:
-                diffs["cpu.max"] = abs(cr - pr) > 1e-9
-        else:
-            diffs["cpu.max"] = False
+        diffs["cpu.max"] = False
     return diffs
 
 def walk_v2(root: Path) -> Dict[str, Dict[str, Any]]:
-    """
-    Walk common slices and collect units. Returns mapping path->info
-    """
-    cgroot = None
-    for p in [root / "sys" / "fs" / "cgroup", root / "cgroup"]:
-        if exists(p):
-            cgroot = p
-            break
-    if not cgroot:
-        return {}
+    cgroot = root / "sys" / "fs" / "cgroup"
+    if not exists(cgroot):
+        cgroot = root / "cgroup"
     results: Dict[str, Dict[str, Any]] = {}
-    # Consider top-level slices
-    top_slices = [cgroot / "system.slice", cgroot / "user.slice", cgroot / "machine.slice"]
-    for ts in top_slices:
+    seeds = [cgroot / "system.slice", cgroot / "user.slice", cgroot / "machine.slice"]
+    if not any(exists(s) for s in seeds):
+        seeds = [cgroot]
+    for ts in seeds:
         if not exists(ts):
             continue
-        parent_limits = read_v2_limits(ts)  # compare children against their slice
-        results[str(ts.relative_to(root))] = {"type": "slice", "limits": parent_limits, "diff": {"memory.max": False, "pids.max": False, "cpu.max": False}, "parent": str(ts.parent.relative_to(root)) if ts.parent != ts else None}
-        # BFS within slice
         stack = [ts]
         while stack:
             cur = stack.pop()
             for sub in list_dirs(cur):
-                name = sub.name
-                if name in (".", ".."):
-                    continue
-                limits = read_v2_limits(sub)
                 parent_l = read_v2_limits(cur)
+                limits = read_v2_limits(sub)
                 diffs = compare_v2(limits, parent_l)
-                entry_type = "unit" if (name.endswith(".service") or name.endswith(".scope")) else "slice" if name.endswith(".slice") else "dir"
-                results[str(sub.relative_to(root))] = {"type": entry_type, "limits": limits, "diff": diffs, "parent": str(cur.relative_to(root))}
-                if entry_type in ("slice", "dir"):
-                    stack.append(sub)
+                name = sub.name
+                etype = "unit" if (name.endswith(".service") or name.endswith(".scope")) else ("slice" if name.endswith(".slice") else "dir")
+                rel = str(sub.relative_to(root))
+                results[rel] = {"type": etype, "limits": limits, "diff": diffs, "parent": str(cur.relative_to(root))}
+                stack.append(sub)
     return results
 
-# ---------------------- Cgroup v1 analysis ----------------------
-def read_v1_value(base: Path, subpath: Path) -> Optional[str]:
-    p = base / subpath
-    return read_first_line(p)
+# ---------------------- cgroup v1 ----------------------
+def read_v1_vals(cur: Path, files: List[str]) -> Dict[str, Optional[str]]:
+    return {fn: read_first_line(cur / fn) for fn in files}
+
+def v1_cpu_mode_ratio(vals: Dict[str, Optional[str]]) -> Tuple[str, Optional[float]]:
+    try:
+        q = int(vals.get("cpu.cfs_quota_us") or "-1")
+    except Exception:
+        q = -1
+    try:
+        p = int(vals.get("cpu.cfs_period_us") or "100000")
+    except Exception:
+        p = 100000
+    if q == -1:
+        return "max", None
+    if q > 0 and p > 0:
+        return "limit", q / p
+    return "unknown", None
 
 def walk_v1(root: Path) -> Dict[str, Dict[str, Any]]:
     """
-    Minimal v1: check cpu, memory, pids controller values. Compare child to parent.
+    Walk v1 controllers (cpu, memory, pids) and compare each dir vs its parent.
+    Return entries keyed by "<relative_path>::<controller>".
     """
-    cgr = None
-    for p in [root / "sys" / "fs" / "cgroup", root / "cgroup"]:
-        if exists(p):
-            cgr = p
-            break
-    if not cgr:
-        return {}
-
+    cgr = root / "sys" / "fs" / "cgroup"
+    if not exists(cgr):
+        cgr = root / "cgroup"
     controllers = {
-        "cpu": ("cpu.cfs_quota_us", "cpu.cfs_period_us"),
-        "memory": ("memory.limit_in_bytes",),
-        "pids": ("pids.max",),
+        "cpu": ["cpu.cfs_quota_us", "cpu.cfs_period_us"],
+        "memory": ["memory.limit_in_bytes"],
+        "pids": ["pids.max"],
     }
     results: Dict[str, Dict[str, Any]] = {}
     for ctrl, files in controllers.items():
         base = cgr / ctrl
         if not exists(base):
+            dprint(f"controller {ctrl} missing at {base}")
             continue
-        rootdir = base / "system.slice" if exists(base / "system.slice") else base
-        stack = [rootdir]
-        while stack:
-            cur = stack.pop()
-            vals = {fn: read_first_line(cur / fn) for fn in files}
-            extra: Dict[str, Any] = {}
-            if ctrl == "cpu":
-                try:
-                    q = int(vals.get("cpu.cfs_quota_us") or "-1")
-                except Exception:
-                    q = -1
-                try:
-                    pper = int(vals.get("cpu.cfs_period_us") or "100000")
-                except Exception:
-                    pper = 100000
-                if q > 0 and pper > 0:
-                    extra["cpu.ratio"] = q / pper
-                    extra["cpu.mode"] = "limit"
-                elif q == -1:
-                    extra["cpu.ratio"] = None
-                    extra["cpu.mode"] = "max"
+        seeds = [base / "system.slice"] if exists(base / "system.slice") else [base]
+        for seed in seeds:
+            stack = [seed]
+            while stack:
+                cur = stack.pop()
+                vals = read_v1_vals(cur, files)
+                parent = cur.parent if cur != base else None
+                diffs: Dict[str, bool] = {}
+                parent_vals = {}
+                if parent and exists(parent):
+                    parent_vals = read_v1_vals(parent, files)
+                    for fn in files:
+                        diffs[fn] = (vals.get(fn) != parent_vals.get(fn))
+                    if ctrl == "cpu":
+                        cm, cr = v1_cpu_mode_ratio(vals)
+                        pm, pr = v1_cpu_mode_ratio(parent_vals)
+                        diffs["cpu"] = (cm != pm) or (cm == "limit" and pr is not None and cr is not None and abs(cr - pr) > 1e-9)
                 else:
-                    extra["cpu.ratio"] = None
-                    extra["cpu.mode"] = "unknown"
-            entry = {"type": f"v1:{ctrl}", "limits": {**vals, **extra}}
-            parent = cur.parent if cur != base else None
-            entry["parent"] = str(parent.relative_to(root)) if parent else None
-            diffs: Dict[str, bool] = {}
-            if parent and parent != base and parent.exists():
-                pvals = {fn: read_first_line(parent / fn) for fn in files}
-                for fn in files:
-                    diffs[fn] = (vals.get(fn) != pvals.get(fn))
-                if ctrl == "cpu":
-                    try:
-                        pq = int(pvals.get("cpu.cfs_quota_us") or "-1"); pp = int(pvals.get("cpu.cfs_period_us") or "100000")
-                    except Exception:
-                        pq, pp = -1, 100000
-                    pratio = (pq/pp) if (pq > 0 and pp > 0) else None
-                    pmode = "limit" if (pq > 0 and pp > 0) else ("max" if pq == -1 else "unknown")
-                    diffs["cpu"] = (extra.get("cpu.mode") != pmode) or (extra.get("cpu.mode") == "limit" and pratio is not None and abs(extra.get("cpu.ratio",0) - pratio) > 1e-9)
-            else:
-                for fn in files:
-                    diffs[fn] = False
-                if ctrl == "cpu":
-                    diffs["cpu"] = False
-            entry["diff"] = diffs
-            results[str(cur.relative_to(root)) + f"::{ctrl}"] = entry
+                    for fn in files:
+                        diffs[fn] = False
+                    if ctrl == "cpu":
+                        diffs["cpu"] = False
 
-            for sub in list_dirs(cur):
-                if sub.name in (".", ".."):
-                    continue
-                stack.append(sub)
+                key = f"{str(cur.relative_to(root))}::{ctrl}"
+                cmode, cratio = v1_cpu_mode_ratio(vals) if ctrl == "cpu" else ("", None)
+                results[key] = {
+                    "type": f"v1:{ctrl}",
+                    "limits": {
+                        **vals,
+                        **({"cpu.mode": cmode, "cpu.ratio": cratio} if ctrl == "cpu" else {})
+                    },
+                    "diff": diffs,
+                    "parent": str(parent.relative_to(root)) if parent else None,
+                }
+
+                for sub in list_dirs(cur):
+                    if sub.name in (".", ".."):
+                        continue
+                    stack.append(sub)
     return results
 
-# ---------------------- Presentation ----------------------
-def format_limit_pair(child: Any, parent: Any) -> str:
-    return f"{child} (parent {parent})"
+# ---------------------- Detail printers ----------------------
+def print_v1_detailed_for_path(path_only: str, results: Dict[str, Dict[str, Any]]) -> None:
+    # We expect keys like "<path>::cpu", "<path>::memory", "<path>::pids"
+    print("\n== Detailed limits for:", path_only)
+    controllers = ["cpu", "memory", "pids"]
+    for ctrl in controllers:
+        key = f"{path_only}::{ctrl}"
+        if key not in results:
+            continue
+        info = results[key]
+        parent = info.get("parent")
+        limits = info["limits"]
+        diffs = info["diff"]
 
+        print(f"-- {ctrl} controller --")
+        if ctrl == "cpu":
+            q = limits.get("cpu.cfs_quota_us")
+            p = limits.get("cpu.cfs_period_us")
+            mode = limits.get("cpu.mode")
+            ratio = limits.get("cpu.ratio")
+            print(f"   child: quota={q}, period={p}, mode={mode}, effective={cpu_ratio_to_str(ratio)}")
+            if parent:
+                pkey = f"{parent}::{ctrl}"
+                plim = results.get(pkey, {}).get("limits", {})
+                pmode = plim.get("cpu.mode")
+                pratio = plim.get("cpu.ratio")
+                pq = plim.get("cpu.cfs_quota_us")
+                pp = plim.get("cpu.cfs_period_us")
+                print(f"   parent: {parent}")
+                print(f"           quota={pq}, period={pp}, mode={pmode}, effective={cpu_ratio_to_str(pratio)}")
+            print(f"   changed: {yesno(diffs.get('cpu', False) or diffs.get('cpu.cfs_quota_us', False))}")
+        elif ctrl == "memory":
+            val = limits.get("memory.limit_in_bytes")
+            print(f"   child:  limit={val} ({human_bytes(val)})")
+            if parent:
+                plim = results.get(f"{parent}::{ctrl}", {}).get("limits", {})
+                pv = plim.get("memory.limit_in_bytes")
+                print(f"   parent: {parent}")
+                print(f"           limit={pv} ({human_bytes(pv)})")
+            print(f"   changed: {yesno(diffs.get('memory.limit_in_bytes', False))}")
+        elif ctrl == "pids":
+            val = limits.get("pids.max")
+            pretty = "unlimited" if (val is None or val.lower() == "max") else val
+            print(f"   child:  pids.max={val} ({pretty})")
+            if parent:
+                plim = results.get(f"{parent}::{ctrl}", {}).get("limits", {})
+                pv = plim.get("pids.max")
+                ppretty = "unlimited" if (pv is None or str(pv).lower() == "max") else pv
+                print(f"   parent: {parent}")
+                print(f"           pids.max={pv} ({ppretty})")
+            print(f"   changed: {yesno(diffs.get('pids.max', False))}")
+
+def print_v2_detailed_for_path(path: str, results: Dict[str, Dict[str, Any]]) -> None:
+    info = results.get(path)
+    if not info:
+        return
+    parent = info.get("parent")
+    l = info["limits"]
+    print("\n== Detailed limits for:", path)
+    # memory
+    cm = l.get("memory.max"); print(f"-- memory --")
+    print(f"   child:  memory.max={cm} ({human_bytes(cm)})")
+    if parent:
+        pl = results.get(parent, {}).get("limits", {})
+        pm = pl.get("memory.max"); print(f"   parent: {parent}")
+        print(f"           memory.max={pm} ({human_bytes(pm)})")
+    print(f"   changed: {yesno(info['diff'].get('memory.max', False))}")
+    # pids
+    cp = l.get("pids.max"); print(f"-- pids --")
+    ppretty = "unlimited" if (cp is None or str(cp).lower() == "max") else cp
+    print(f"   child:  pids.max={cp} ({ppretty})")
+    if parent:
+        pl = results.get(parent, {}).get("limits", {})
+        pp = pl.get("pids.max")
+        pppretty = "unlimited" if (pp is None or str(pp).lower() == "max") else pp
+        print(f"   parent: {parent}")
+        print(f"           pids.max={pp} ({ppprety if 'ppprety' in locals() else pppretty})")
+    print(f"   changed: {yesno(info['diff'].get('pids.max', False))}")
+    # cpu
+    print(f"-- cpu --")
+    print(f"   child:  cpu.max={l.get('cpu.max')} (effective {cpu_ratio_to_str(l.get('cpu.ratio'))})")
+    if parent:
+        pl = results.get(parent, {}).get("limits", {})
+        print(f"   parent: {parent}")
+        print(f"           cpu.max={pl.get('cpu.max')} (effective {cpu_ratio_to_str(pl.get('cpu.ratio'))})")
+    print(f"   changed: {yesno(info['diff'].get('cpu.max', False))}")
+
+# ---------------------- main ----------------------
 def main():
-    global VERBOSE, DEBUG
-    ap = argparse.ArgumentParser(description="Check cgroup changes from defaults (sosreport).")
-    ap.add_argument("-v", action="store_true", help="Verbose output")
-    ap.add_argument("-d", action="store_true", help="Debug output")
+    global VERBOSE, DEBUG, UNIT_FILTER
+    ap = argparse.ArgumentParser(description="Check cgroup changes from defaults in sosreport")
+    ap.add_argument("-v", action="store_true", help="Verbose")
+    ap.add_argument("-d", action="store_true", help="Debug")
+    ap.add_argument("-u", metavar="UNIT", help="Filter by substring in unit/slice path")
     args = ap.parse_args()
-    VERBOSE = args.v
-    DEBUG = args.d
+    VERBOSE, DEBUG, UNIT_FILTER = args.v, args.d, args.u
 
     print("== chk_cg: cgroup change detector (sosreport mode) ==")
     cgv = detect_cgv(ROOT)
-    print(f"Detected cgroup version: {cgv}")
-    if cgv == "unknown":
-        print("Could not find cgroup data under ./sys/fs/cgroup or ./cgroup")
-    print()
+    print(f"Detected cgroup version: {cgv}\n")
 
     # Systemd manager defaults
     print("-- systemd manager defaults (effective vs vendor) --")
     mgr = layered_systemd_defaults()
-    any_overrides = False
+    overrides = []
     for k in sorted(CONF_KEYS):
-        info = mgr.get(k, {"vendor": None, "effective": None, "etc": None, "dropin": None})
-        if info["vendor"] != info["effective"] and (info["effective"] is not None):
-            any_overrides = True
-            print(f"{k}: effective={info['effective']}  [vendor={info['vendor']}]  (overridden via {('drop-in' if info.get('dropin') else 'etc')})")
-        elif VERBOSE:
-            print(f"{k}: effective={info['effective']}  [vendor={info['vendor']}]")
-        elif info["effective"] is None and DEBUG:
-            print(f"{k}: not found in snapshot")
-    if not any_overrides:
-        print("No manager default overrides detected (or unavailable in snapshot).")
+        v = mgr.get(k, {})
+        if v.get("effective") is not None and v.get("effective") != v.get("vendor"):
+            overrides.append((k, v))
+    if overrides:
+        for k, v in overrides:
+            src = v.get("source", "?")
+            print(f"* {k}: effective={v['effective']}  [vendor={v['vendor']}]  via {src}")
+    else:
+        print("No manager default overrides detected (or not present in snapshot).")
     print()
+
+    specific = looks_like_specific_unit(UNIT_FILTER)
 
     # Cgroup analysis
     if cgv == "v2":
         results = walk_v2(ROOT)
         if not results:
-            print("No cgroup v2 directories found to analyze.")
+            print("No cgroup v2 data found.")
             return 0
         deviants = []
         for path, info in results.items():
-            if info["type"] in ("unit", "slice"):
-                diffs = info["diff"]
-                if diffs.get("memory.max") or diffs.get("pids.max") or diffs.get("cpu.max"):
+            if info["type"] in ("unit", "slice", "dir") and any(info["diff"].values()):
+                if match_unit(path):
                     deviants.append((path, info))
-        print("-- cgroup v2 deviations from parent slice --")
+        print("-- cgroup v2 deviations from parent --")
         if not deviants:
-            print("No per-unit or slice deviations detected (vs parent slice).")
+            msg = "None found"
+            if UNIT_FILTER:
+                msg += f" (after filter: {UNIT_FILTER})"
+            print(msg + ".")
         else:
             for path, info in sorted(deviants):
-                parent_path = info["parent"]
-                pl = results.get(parent_path, {}).get("limits", {}) if parent_path else {}
-                l = info["limits"]
                 tags = [k for k, v in info["diff"].items() if v]
                 print(f"* {path} [{info['type']}] changed: {', '.join(tags)}")
-                if VERBOSE:
+                if VERBOSE and not specific:
+                    parent_limits = {}
+                    if info.get("parent"):
+                        parent_limits = results.get(info["parent"], {}).get("limits", {})
+                    l = info["limits"]
                     if "memory.max" in tags:
-                        print(f"    memory.max: {format_limit_pair(l.get('memory.max'), pl.get('memory.max'))}")
+                        print(f"    memory.max: {l.get('memory.max')} (parent {parent_limits.get('memory.max')})")
                     if "pids.max" in tags:
-                        print(f"    pids.max:   {format_limit_pair(l.get('pids.max'), pl.get('pids.max'))}")
+                        print(f"    pids.max:   {l.get('pids.max')} (parent {parent_limits.get('pids.max')})")
                     if "cpu.max" in tags:
-                        cchild = l.get('cpu.max'); cparent = pl.get('cpu.max')
-                        print(f"    cpu.max:    {format_limit_pair(cchild, cparent)}  (ratio child={l.get('cpu.ratio')} parent={pl.get('cpu.ratio')})")
-        if VERBOSE:
-            print()
-            print("-- sample of units scanned --")
-            cnt = 0
-            for path, info in sorted(results.items()):
-                if info["type"] == "unit":
-                    print(f"  {path}: mem={info['limits'].get('memory.max')} pids={info['limits'].get('pids.max')} cpu={info['limits'].get('cpu.max')}")
-                    cnt += 1
-                    if cnt >= 20:
-                        break
-    elif cgv == "v1":
+                        print(f"    cpu.max:    {l.get('cpu.max')} (parent {parent_limits.get('cpu.max')}); ratios child={l.get('cpu.ratio')} parent={parent_limits.get('cpu.ratio')}")
+        # Detailed section if user targeted a specific unit/slice
+        if specific:
+            # choose first exact matching path(s)
+            targets = [p for p in results.keys() if UNIT_FILTER in p]
+            for t in sorted(targets):
+                print_v2_detailed_for_path(t, results)
+        return 0
+
+    if cgv == "v1":
         results = walk_v1(ROOT)
         if not results:
-            print("No cgroup v1 controller data found to analyze.")
+            print("No cgroup v1 controller data found.")
             return 0
-        print("-- cgroup v1 deviations (per controller) --")
-        for path, info in sorted(results.items()):
-            diffs = info.get("diff", {})
-            if any(diffs.values()):
-                print(f"* {path} changed: {', '.join([k for k, v in diffs.items() if v])}")
-                if VERBOSE:
-                    print(f"    limits: {info['limits']} (parent: {info['parent']})")
-        if VERBOSE:
-            print()
-            shown = 0
-            for path, info in sorted(results.items()):
-                print(f"  {path}: {info['limits']}")
-                shown += 1
-                if shown >= 20:
-                    break
-    else:
-        print("-- skipping cgroup scan due to unknown version --")
+        print("-- cgroup v1 deviations (per controller vs parent) --")
+        deviants = []
+        for key, info in results.items():
+            path_only = key.split("::", 1)[0]
+            if any(info.get("diff", {}).values()) and match_unit(path_only):
+                deviants.append((key, info))
+        if not deviants:
+            msg = "None found"
+            if UNIT_FILTER:
+                msg += f" (after filter: {UNIT_FILTER})"
+            print(msg + ".")
+        else:
+            for key, info in sorted(deviants):
+                ctrl = info["type"].split(":", 1)[-1]
+                tags = [k for k, v in info.get("diff", {}).items() if v]
+                print(f"* {key} changed: {', '.join(tags)}")
+                if VERBOSE and not looks_like_specific_unit(UNIT_FILTER):
+                    print(f"    limits: {info['limits']} (parent: {info.get('parent')})")
+        # Detailed section if user targeted a specific unit/slice
+        if specific:
+            # group keys by path
+            paths = sorted({k.split("::",1)[0] for k in results if UNIT_FILTER in k})
+            for path_only in paths:
+                print_v1_detailed_for_path(path_only, results)
+        return 0
 
+    print("-- skipping cgroup scan: unknown cgroup version --")
     return 0
 
 if __name__ == "__main__":
