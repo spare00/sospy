@@ -3,6 +3,10 @@
 import argparse
 import re
 import hashlib
+import os
+import stat
+import sys
+import time
 from collections import defaultdict
 
 # Heuristics: function names that indicate allocation sites (generic/top of stack)
@@ -60,6 +64,68 @@ ALLOC_HEADER_ORDER_RE = re.compile(
     r"^Page\s+allocated\s+via\s+order\s+(\d+),\s*mask\s+0x[0-9a-fA-F]+"
 )
 
+# -------------------------
+# Progress helper (stderr)
+# -------------------------
+
+class Progress:
+    def __init__(self, label: str, total_bytes=None, interval: float = 0.5, stream=None):
+        self.label = label
+        self.total = total_bytes
+        self.interval = interval
+        self.stream = stream or sys.stderr
+        self.start = time.time()
+        self.last_t = 0.0
+        self.last_bytes = 0
+
+    def update(self, bytes_read: int):
+        now = time.time()
+        if now - self.last_t < self.interval:
+            return
+        self._print(bytes_read, now)
+        self.last_t = now
+        self.last_bytes = bytes_read
+
+    def done(self, bytes_read: int):
+        self._print(bytes_read, time.time(), final=True)
+
+    def _print(self, bytes_read: int, now: float, final: bool = False):
+        elapsed = max(now - self.start, 1e-9)
+        rate = bytes_read / (1024 * 1024) / elapsed  # MB/s
+        if self.total and self.total > 0:
+            pct = min(100.0, (bytes_read / self.total) * 100.0)
+            msg = f"{self.label}: {pct:6.2f}%  {bytes_read/1_048_576:.1f}/{self.total/1_048_576:.1f} MB  {rate:.1f} MB/s"
+        else:
+            msg = f"{self.label}: {bytes_read/1_048_576:.1f} MB read  {rate:.1f} MB/s"
+        endc = "\n" if final else "\r"
+        print(msg, end=endc, file=self.stream, flush=True)
+
+def _regular_file_size(path):
+    try:
+        st = os.stat(path)
+        if stat.S_ISREG(st.st_mode):
+            return st.st_size
+    except Exception:
+        pass
+    return None
+
+# Progress-safe position getter for text files iterated with "for line in f"
+def _file_progress_pos(f):
+    # Prefer raw buffered position if available (works during iteration)
+    try:
+        return f.buffer.tell()
+    except Exception:
+        pass
+    # Fallback to text tell() if allowed
+    try:
+        return f.tell()
+    except Exception:
+        return None
+
+# -------------------------
+# Core functions
+# -------------------------
+
 def quick_detect_dump_kind(path, max_lines=5000):
     """
     Quickly determine if dump is type2 (pid/tgid on header) or type1.
@@ -81,28 +147,36 @@ def quick_detect_dump_kind(path, max_lines=5000):
         return 'unknown'
     return 'type1' if saw_any else 'unknown'
 
-def parse_totals_only(path):
+def parse_totals_only(path, progress=None):
     """
     Super-fast path for -t only: just count allocations and pages per order.
     Ignores stacks entirely.
     """
     order_stats = defaultdict(lambda: {'allocs': 0, 'pages': 0})
-    with open(path, 'r', encoding='utf-8', errors='replace') as f:
+    # bigger buffer helps for huge files
+    with open(path, 'r', encoding='utf-8', errors='replace', buffering=1024*1024) as f:
         for raw in f:
-            line = raw.strip()
+            # cheaper than .strip(); header is at line start
+            line = raw.rstrip('\n')
             m = ALLOC_HEADER_ORDER_RE.match(line)
-            if not m:
-                continue
-            try:
-                order = int(m.group(1))
-            except ValueError:
-                continue
-            pages = 1 << order
-            order_stats[order]['allocs'] += 1
-            order_stats[order]['pages'] += pages
+            if m:
+                try:
+                    order = int(m.group(1))
+                except ValueError:
+                    continue
+                pages = 1 << order
+                order_stats[order]['allocs'] += 1
+                order_stats[order]['pages'] += pages
+            if progress:
+                pos = _file_progress_pos(f)
+                if pos is not None:
+                    progress.update(pos)
+    if progress:
+        pos = _file_progress_pos(f)
+        progress.done(pos or 0)
     return order_stats
 
-def parse_page_owner(filename, debug=False, strict=False):
+def parse_page_owner(filename, debug=False, strict=False, progress=None, collect_calltraces=False):
     process_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     module_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})  # exactly one module per allocation (or none)
     slab_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})    # kept for completeness
@@ -179,20 +253,20 @@ def parse_page_owner(filename, debug=False, strict=False):
                 alloc_idx = i
                 break
 
-	# Slab classification (prefer slab if any slab allocator appears in the trace)
-	# Option A: simplest & robust — if any slab allocator exists, treat as slab
+        # Slab classification (prefer slab if any slab allocator appears in the trace)
+        # Option A: simplest & robust — if any slab allocator exists, treat as slab
         is_slab_alloc = any(SLAB_ALLOCATOR_FUNC_RE.search(func) for func, _ in frames)
 
-	# Option B (more conservative): slab only if a slab allocator appears at/above the first generic allocator
-	# is_slab_alloc = False
-	# if alloc_idx is not None:
-	#     for i, (func, _mod) in enumerate(frames[:alloc_idx+1]):
-	#         if SLAB_ALLOCATOR_FUNC_RE.search(func):
-	#             is_slab_alloc = True
-	#             break
-	# else:
-	#     # If we didn't detect a generic allocator but still see a slab frame, treat as slab
-	#     is_slab_alloc = any(SLAB_ALLOCATOR_FUNC_RE.search(func) for func, _ in frames)
+        # Option B (more conservative): slab only if a slab allocator appears at/above the first generic allocator
+        # is_slab_alloc = False
+        # if alloc_idx is not None:
+        #     for i, (func, _mod) in enumerate(frames[:alloc_idx+1]):
+        #         if SLAB_ALLOCATOR_FUNC_RE.search(func):
+        #             is_slab_alloc = True
+        #             break
+        # else:
+        #     # If we didn't detect a generic allocator but still see a slab frame, treat as slab
+        #     is_slab_alloc = any(SLAB_ALLOCATOR_FUNC_RE.search(func) for func, _ in frames)
 
         # Per-process slab/non-slab (meaningful with type2 process names)
         if process_name != 'Unknown':
@@ -246,58 +320,113 @@ def parse_page_owner(filename, debug=False, strict=False):
             process_module_pages[(process_name, attributed_module)]['pages'] += pages
             process_module_pages[(process_name, attributed_module)]['allocs'] += 1
 
-        # Call trace grouping
-        trace_str = "\n".join(current_calltrace)
-        trace_key = hashlib.sha256(trace_str.encode()).hexdigest()
-        current_allocation['trace_key'] = trace_key
-        current_allocation['pages'] = pages
-        if trace_key not in calltrace_index:
-            calltrace_index[trace_key] = current_calltrace.copy()
-        calltrace_data[trace_key]['count'] += 1
-        calltrace_data[trace_key]['pages'] += pages
-        allocations.append({"process": process_name, "trace_key": trace_key, "pages": pages})
+        # Call trace grouping (only if requested; saves huge time/mem)
+        if collect_calltraces:
+            trace_str = "\n".join(current_calltrace)
+            # blake2s is faster than sha256; 16 bytes is enough for grouping
+            h = hashlib.blake2s(trace_str.encode(), digest_size=16).hexdigest()
+            trace_key = h
+            current_allocation['trace_key'] = trace_key
+            current_allocation['pages'] = pages
+            if trace_key not in calltrace_index:
+                calltrace_index[trace_key] = current_calltrace.copy()
+            calltrace_data[trace_key]['count'] += 1
+            calltrace_data[trace_key]['pages'] += pages
+            allocations.append({"process": process_name, "trace_key": trace_key, "pages": pages})
 
         total_allocs += 1
         in_trace = False
         current_allocation = {}
         current_calltrace = []
 
-    with open(filename, 'r', encoding='utf-8', errors='replace') as f:
+    with open(filename, 'r', encoding='utf-8', errors='replace', buffering=1024*1024) as f:
         for raw_line in f:
-            line = raw_line.strip()
+            # Avoid full .strip(); semantics we rely on:
+            # - Headers start at column 0
+            # - Empty line == end of a trace
+            # - PFN lines start with 'PFN'
+            s = raw_line.rstrip('\n')
+            line = s
 
             if line.startswith("Page allocated"):
                 if in_trace:
                     finalize_current()
 
                 valid_allocation_detected = True
-                m2 = re.search(r"order (\d+), mask .*?, pid (\d+), tgid (\d+) \((.*?)\), ts (\d+)(?:\s*ns)?", line)
-                if m2:
+                # Fast path parse for type2 before regex: cheaper splits
+                m2 = None
+                if " pid " in line and " tgid " in line and " ts " in line:
                     try:
-                        order = int(m2.group(1))
-                    except ValueError:
-                        skipped_allocations['invalid_order'] += 1
-                        in_trace = False
-                        continue
+                        # Example:
+                        # Page allocated via order 6, mask 0x..., pid 1, tgid 1 (swapper/0), ts 377...
+                        # Pull 'order ' and commas quickly
+                        # Order
+                        oi = line.find("order ")
+                        ci = line.find(",", oi)
+                        order = int(line[oi+6:ci].strip())
+                        # pid
+                        pi = line.find("pid ", ci) + 4
+                        ci2 = line.find(",", pi)
+                        pid = int(line[pi:ci2].strip())
+                        # tgid
+                        ti = line.find("tgid ", ci2) + 5
+                        si = line.find(" (", ti)
+                        tgid = int(line[ti:si].strip())
+                        # comm
+                        ei = line.find("), ts ", si)
+                        comm = line[si+2:ei]
+                        # ts
+                        ts = int(line[ei+6:].split()[0])
+                        m2 = (order, pid, tgid, comm, ts)
+                    except Exception:
+                        m2 = None
+                if not m2:
+                    # Fallback to regex for odd lines
+                    rx2 = re.search(r"order (\d+), mask .*?, pid (\d+), tgid (\d+) \((.*?)\), ts (\d+)(?:\s*ns)?", line)
+                    if rx2:
+                        m2 = (int(rx2.group(1)), int(rx2.group(2)), int(rx2.group(3)), rx2.group(4), int(rx2.group(5)))
+                if m2:
+                    order, pid, tgid, comm, ts = m2
+                    if not isinstance(order, int):
+                        try:
+                            order = int(order)
+                        except Exception:
+                            skipped_allocations['invalid_order'] += 1
+                            in_trace = False
+                            if progress:
+                                pos = _file_progress_pos(f)
+                                if pos is not None:
+                                    progress.update(pos)
+                            continue
                     current_allocation = {
                         'order': order,
-                        'pid': int(m2.group(2)),
-                        'tgid': int(m2.group(3)),
-                        'process': m2.group(4),
-                        'ts': int(m2.group(5)),
+                        'pid': pid,
+                        'tgid': tgid,
+                        'process': comm,
+                        'ts': ts,
                     }
                     has_process_metadata = True
                     in_trace = True
                     current_calltrace = []
                 else:
-                    m1 = re.search(r"order (\d+), mask", line)
-                    if m1:
+                    # Fast path for type1 header
+                    m1 = None
+                    if "order " in line and ", mask" in line:
                         try:
-                            order = int(m1.group(1))
-                        except ValueError:
-                            skipped_allocations['invalid_order'] += 1
-                            in_trace = False
-                            continue
+                            oi = line.find("order ")
+                            ci = line.find(",", oi)
+                            m1 = int(line[oi+6:ci].strip())
+                        except Exception:
+                            m1 = None
+                    if m1 is None:
+                        rx1 = re.search(r"order (\d+), mask", line)
+                        if rx1:
+                            try:
+                                m1 = int(rx1.group(1))
+                            except Exception:
+                                m1 = None
+                    if m1:
+                        order = m1
                         current_allocation = {
                             'order': order,
                             'pid': -1,
@@ -316,6 +445,12 @@ def parse_page_owner(filename, debug=False, strict=False):
 
             elif in_trace and line:
                 current_calltrace.append(line)
+            elif in_trace and line:
+                if collect_calltraces:
+                    current_calltrace.append(line)
+                else:
+                    # Still keep the lines for attribution later, but minimize parsing work now.
+                    current_calltrace.append(line)
 
             elif in_trace and not line:
                 finalize_current()
@@ -325,7 +460,16 @@ def parse_page_owner(filename, debug=False, strict=False):
                     skipped_allocations['incomplete_trace'] += 1
                 in_trace = False
 
+            if progress:
+                pos = _file_progress_pos(f)
+                if pos is not None:
+                    progress.update(pos)
+
         finalize_current()
+
+    if progress:
+        pos = _file_progress_pos(f)
+        progress.done(pos or 0)
 
     return (process_data, module_data, slab_data, calltrace_data, calltrace_index,
             process_module_pages, total_allocs, skipped_allocations,
@@ -381,8 +525,8 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
     print("=" * 50)
 
     if filter_by_process and process_to_traces and allocations:
-        allowed_keys = process_to_traces.get(filter_by_process, set())
         filtered_stats = defaultdict(lambda: {'count': 0, 'pages': 0})
+        allowed_keys = process_to_traces.get(filter_by_process, set())
         for alloc in allocations:
             if alloc['process'] == filter_by_process and alloc['trace_key'] in allowed_keys:
                 filtered_stats[alloc['trace_key']]['count'] += 1
@@ -562,6 +706,11 @@ def main():
     parser.add_argument("--filter-module", type=str, help="Show top processes using this module")
     parser.add_argument("--strict", action="store_true", help="Attribute only when a module-tagged frame at/under the first allocator looks allocation-like (e.g., vx_alloc, getblk, new_*)")
     parser.add_argument("--detect-lines", type=int, default=5000, help="Max lines to scan for dump kind detection before full parse (default: 5000)")
+
+    # NEW: progress options
+    parser.add_argument("--progress", action="store_true", help="Show parsing progress to stderr")
+    parser.add_argument("--progress-interval", type=float, default=0.5, help="Seconds between progress updates (default: 0.5)")
+
     args = parser.parse_args()
     unit = args.unit or 'G'
 
@@ -583,36 +732,28 @@ def main():
     dump_kind = quick_detect_dump_kind(args.file, max_lines=args.detect_lines)
 
     # Helper: do we have any non-process reports requested?
-    # (Totals, plain modules table when -m is used WITHOUT -p, or calltraces)
     non_process_reports = (
         args.total or
         (args.modules and not args.processes) or
         args.calltraces
     )
 
-
     # If -p is present, enforce type gating first to avoid long waits on Type-1
     if args.processes and dump_kind == 'type1':
-        # Process-dependent requests (anything that needs per-process attribution)
         process_dependent_only = (
             args.processes and
-            # No non-process reports are requested
             not non_process_reports
         )
         if process_dependent_only:
-            # Examples: -p ; -p -s ; -p -m ; -p -s -m
             print("Process views (-p) require a Type-2 dump with process metadata. Skipping full parse.")
             return
         else:
-            # We have other non-process reports to produce; disable all process-based views
             print("Process views (-p) require Type-2; will skip process-based outputs.")
             args.processes = False
-            # Also disable -s because slab-by-process requires Type-2
             if args.slabs:
                 print("Slab view (-s) requires Type-2; skipping slab outputs.")
                 args.slabs = False
 
-    # If -s (without -p) was requested on Type-1, skip it early as well
     if args.slabs and not args.processes and dump_kind == 'type1':
         print("Slab view (-s): Requires Type-2 dump with process metadata. Skipping.")
         args.slabs = False
@@ -623,7 +764,11 @@ def main():
         if args.verbose:
             kind_msg = f"Detected dump kind: {dump_kind}" if dump_kind != 'unknown' else "Dump kind: unknown"
             print(f"Analyzing {args.file} (totals only). {kind_msg}")
-        order_stats = parse_totals_only(args.file)
+        prog = None
+        if args.progress:
+            total_bytes = _regular_file_size(args.file)
+            prog = Progress("Totals-only parse", total_bytes=total_bytes, interval=args.progress_interval)
+        order_stats = parse_totals_only(args.file, progress=prog)
         if args.verbose:
             show_totals_verbose(order_stats)
         else:
@@ -634,11 +779,16 @@ def main():
         kind_msg = f"Detected dump kind: {dump_kind}" if dump_kind != 'unknown' else "Dump kind: unknown"
         print(f"Analyzing {args.file} with unit {unit}{' (strict mode)' if args.strict else ''}. {kind_msg}")
 
+    prog = None
+    if args.progress:
+        total_bytes = _regular_file_size(args.file)
+        prog = Progress("Full parse", total_bytes=total_bytes, interval=args.progress_interval)
+
     (process_data, module_data, slab_data, calltrace_data, calltrace_index,
      process_module_pages, total_allocs, skipped_allocations,
      valid_allocation_detected, has_process_metadata, allocations,
      order_stats, proc_slab_stats) = parse_page_owner(
-        args.file, args.debug, strict=args.strict
+        args.file, args.debug, strict=args.strict, progress=prog
     )
 
     # --- Modules report (only when -m is used without -p or -s)
@@ -650,7 +800,6 @@ def main():
         if not has_process_metadata:
             print("Slab view (-s): Requires Type-2 dump with process metadata.")
         else:
-            # -s only : slab-only usage per process (Top 10)
             show_slab_by_process(proc_slab_stats, unit, top_n=10)
 
     # --- Processes report
@@ -692,3 +841,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
