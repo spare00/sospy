@@ -147,7 +147,7 @@ def quick_detect_dump_kind(path, max_lines=5000):
         return 'unknown'
     return 'type1' if saw_any else 'unknown'
 
-def parse_totals_only(path, progress=None):
+def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
     """
     Super-fast path for -t only: just count allocations and pages per order.
     Ignores stacks entirely.
@@ -160,12 +160,22 @@ def parse_totals_only(path, progress=None):
             line = raw.rstrip('\n')
             m = ALLOC_HEADER_ORDER_RE.match(line)
             if m:
+                # systematic sampling: keep every N-th allocation
+                take = (alloc_idx % sample_every == sample_offset)
+                alloc_idx += 1
+                if not take:
+                    if progress:
+                        pos = _file_progress_pos(f)
+                        if pos is not None:
+                            progress.update(pos)
+                    continue
                 try:
                     order = int(m.group(1))
                 except ValueError:
                     continue
-                pages = 1 << order
-                order_stats[order]['allocs'] += 1
+                w = sample_every  # scale up to estimate full dataset
+                pages = (1 << order) * w
+                order_stats[order]['allocs'] += w
                 order_stats[order]['pages'] += pages
             if progress:
                 pos = _file_progress_pos(f)
@@ -176,7 +186,8 @@ def parse_totals_only(path, progress=None):
         progress.done(pos or 0)
     return order_stats
 
-def parse_page_owner(filename, debug=False, strict=False, progress=None, collect_calltraces=False):
+def parse_page_owner(filename, debug=False, strict=False, progress=None,
+                     collect_calltraces=False, sample_every=1, sample_offset=0):
     process_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     module_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})  # exactly one module per allocation (or none)
     slab_data = defaultdict(lambda: {'allocs': 0, 'pages': 0})    # kept for completeness
@@ -198,6 +209,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
     total_allocs = 0
     valid_allocation_detected = False
     has_process_metadata = False  # becomes True if any type2 header seen
+    alloc_idx_seen = 0
 
     def _is_module_token(tok: str) -> bool:
         t = tok.strip()
@@ -230,17 +242,25 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
         nonlocal in_trace, current_allocation, current_calltrace, total_allocs, has_process_metadata
         if not in_trace or 'order' not in current_allocation:
             return
+        # If this allocation was not sampled, just drop it quickly
+        if not current_allocation.get('sampled', False):
+            in_trace = False
+            current_allocation = {}
+            current_calltrace = []
+            return
 
         order = current_allocation.get('order', 0)
-        pages = 1 << order
+        base_pages = 1 << order
+        w = int(current_allocation.get('weight', 1)) or w
+        pages = base_pages * w
         process_name = current_allocation.get('process', 'Unknown')
 
         # Process totals
-        process_data[process_name]['allocs'] += 1
+        process_data[process_name]['allocs'] += w
         process_data[process_name]['pages'] += pages
 
         # Totals per-order
-        order_stats[order]['allocs'] += 1
+        order_stats[order]['allocs'] += w
         order_stats[order]['pages'] += pages
 
         # Parse frames
@@ -272,10 +292,10 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
         if process_name != 'Unknown':
             if is_slab_alloc:
                 proc_slab_stats[process_name]['slab_pages'] += pages
-                proc_slab_stats[process_name]['slab_allocs'] += 1
+                proc_slab_stats[process_name]['slab_allocs'] += w
             else:
                 proc_slab_stats[process_name]['non_slab_pages'] += pages
-                proc_slab_stats[process_name]['non_slab_allocs'] += 1
+                proc_slab_stats[process_name]['non_slab_allocs'] += w
 
         # Module attribution
         attributed_module = None
@@ -310,15 +330,15 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
         # (Optional) slab-ish functions record
         for func, _ in frames:
             if re.search(r'kmalloc|slab|cache|kfree', func, re.IGNORECASE):
-                slab_data[func]['allocs'] += 1
+                slab_data[func]['allocs'] += w
                 slab_data[func]['pages'] += pages
 
         # Apply module attribution
         if attributed_module:
-            module_data[attributed_module]['allocs'] += 1
+            module_data[attributed_module]['allocs'] += w
             module_data[attributed_module]['pages'] += pages
             process_module_pages[(process_name, attributed_module)]['pages'] += pages
-            process_module_pages[(process_name, attributed_module)]['allocs'] += 1
+            process_module_pages[(process_name, attributed_module)]['allocs'] += w
 
         # Call trace grouping (only if requested; saves huge time/mem)
         if collect_calltraces:
@@ -330,11 +350,11 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
             current_allocation['pages'] = pages
             if trace_key not in calltrace_index:
                 calltrace_index[trace_key] = current_calltrace.copy()
-            calltrace_data[trace_key]['count'] += 1
+            calltrace_data[trace_key]['count'] += w
             calltrace_data[trace_key]['pages'] += pages
-            allocations.append({"process": process_name, "trace_key": trace_key, "pages": pages})
+            allocations.append({"process": process_name, "trace_key": trace_key, "pages": pages, "weight": w})
 
-        total_allocs += 1
+        total_allocs += w
         in_trace = False
         current_allocation = {}
         current_calltrace = []
@@ -353,6 +373,11 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
                     finalize_current()
 
                 valid_allocation_detected = True
+
+                # --- decide sampling for this allocation ---
+                take_this = (alloc_idx_seen % sample_every == sample_offset)
+                alloc_idx_seen += 1
+
                 # Fast path parse for type2 before regex: cheaper splits
                 m2 = None
                 if " pid " in line and " tgid " in line and " ts " in line:
@@ -387,23 +412,14 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
                         m2 = (int(rx2.group(1)), int(rx2.group(2)), int(rx2.group(3)), rx2.group(4), int(rx2.group(5)))
                 if m2:
                     order, pid, tgid, comm, ts = m2
-                    if not isinstance(order, int):
-                        try:
-                            order = int(order)
-                        except Exception:
-                            skipped_allocations['invalid_order'] += 1
-                            in_trace = False
-                            if progress:
-                                pos = _file_progress_pos(f)
-                                if pos is not None:
-                                    progress.update(pos)
-                            continue
                     current_allocation = {
                         'order': order,
                         'pid': pid,
                         'tgid': tgid,
                         'process': comm,
                         'ts': ts,
+                        'sampled': take_this,
+                        'weight': sample_every if take_this else 0,
                     }
                     has_process_metadata = True
                     in_trace = True
@@ -433,6 +449,8 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
                             'tgid': -1,
                             'process': 'Unknown',
                             'ts': -1,
+                            'sampled': take_this,
+                            'weight': sample_every if take_this else 0,
                         }
                         in_trace = True
                         current_calltrace = []
@@ -446,12 +464,9 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None, collect
             elif in_trace and line:
                 current_calltrace.append(line)
             elif in_trace and line:
-                if collect_calltraces:
+                # Only keep frames for sampled allocations; skip work for others
+                if current_allocation.get('sampled', False):
                     current_calltrace.append(line)
-                else:
-                    # Still keep the lines for attribution later, but minimize parsing work now.
-                    current_calltrace.append(line)
-
             elif in_trace and not line:
                 finalize_current()
 
@@ -529,7 +544,7 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
         allowed_keys = process_to_traces.get(filter_by_process, set())
         for alloc in allocations:
             if alloc['process'] == filter_by_process and alloc['trace_key'] in allowed_keys:
-                filtered_stats[alloc['trace_key']]['count'] += 1
+                filtered_stats[alloc['trace_key']]['count'] += w
                 filtered_stats[alloc['trace_key']]['pages'] += alloc['pages']
     else:
         filtered_stats = calltrace_data
@@ -706,6 +721,11 @@ def main():
     parser.add_argument("--filter-module", type=str, help="Show top processes using this module")
     parser.add_argument("--strict", action="store_true", help="Attribute only when a module-tagged frame at/under the first allocator looks allocation-like (e.g., vx_alloc, getblk, new_*)")
     parser.add_argument("--detect-lines", type=int, default=5000, help="Max lines to scan for dump kind detection before full parse (default: 5000)")
+    # Sampling options
+    parser.add_argument("--sample-every", type=int, default=1,
+                        help="Systematic sampling: keep every N-th allocation and scale results by N (default: 1 = no sampling)")
+    parser.add_argument("--sample-offset", type=int, default=0,
+                        help="With --sample-every N, keep allocations where index %% N == offset (default: 0)")
 
     # NEW: progress options
     parser.add_argument("--progress", action="store_true", help="Show parsing progress to stderr")
@@ -759,6 +779,13 @@ def main():
         args.slabs = False
 
     # Fast totals-only path stays the same (can short-circuit before full parse)
+    # Normalize sampling args
+    if args.sample_every < 1:
+        args.sample_every = 1
+    if args.sample_offset < 0 or (args.sample_every > 1 and args.sample_offset >= args.sample_every):
+        print(f"Warning: clamping --sample-offset to range [0,{max(0,args.sample_every-1)}]")
+        args.sample_offset = 0
+
     only_totals = args.total and not (args.processes or args.modules or args.slabs or args.calltraces)
     if only_totals:
         if args.verbose:
@@ -768,7 +795,12 @@ def main():
         if args.progress:
             total_bytes = _regular_file_size(args.file)
             prog = Progress("Totals-only parse", total_bytes=total_bytes, interval=args.progress_interval)
-        order_stats = parse_totals_only(args.file, progress=prog)
+        order_stats = parse_totals_only(
+            args.file,
+            progress=prog,
+            sample_every=args.sample_every,
+            sample_offset=args.sample_offset,
+        )
         if args.verbose:
             show_totals_verbose(order_stats)
         else:
@@ -788,7 +820,10 @@ def main():
      process_module_pages, total_allocs, skipped_allocations,
      valid_allocation_detected, has_process_metadata, allocations,
      order_stats, proc_slab_stats) = parse_page_owner(
-        args.file, args.debug, strict=args.strict, progress=prog
+        args.file, args.debug, strict=args.strict, progress=prog,
+        collect_calltraces=args.calltraces,
+        sample_every=args.sample_every,
+        sample_offset=args.sample_offset,
     )
 
     # --- Modules report (only when -m is used without -p or -s)
