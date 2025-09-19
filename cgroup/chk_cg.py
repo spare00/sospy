@@ -64,6 +64,9 @@ def c_green(s: str) -> str:
 def c_yellow(s: str) -> str:
     return _color(s, "33")  # yellow
 
+def c_red(s: str) -> str:
+    return _color(s, "31")  # red
+
 def changed_str(flag: bool) -> str:
     return c_yellow("yes") if flag else c_green("no")
 
@@ -274,7 +277,7 @@ def walk_v1(root: Path) -> Dict[str, Dict[str, Any]]:
         cgr = root / "cgroup"
     controllers = {
         "cpu": ["cpu.cfs_quota_us", "cpu.cfs_period_us"],
-        "memory": ["memory.limit_in_bytes"],
+        "memory": ["memory.limit_in_bytes", "memory.use_hierarchy"],
         "pids": ["pids.max"],
     }
     results: Dict[str, Dict[str, Any]] = {}
@@ -323,6 +326,126 @@ def walk_v1(root: Path) -> Dict[str, Dict[str, Any]]:
                         continue
                     stack.append(sub)
     return results
+
+def _v1_parse_mem_limit(val: Optional[str]) -> Optional[int]:
+    """Return None for unlimited, else integer bytes."""
+    if val is None:
+        return None
+    s = str(val).strip().lower()
+    if s == "max":
+        return None
+    try:
+        n = int(s, 10)
+    except Exception:
+        return None
+    # Treat absurdly large (v1 "unlimited") as unlimited
+    if n >= (1 << 60):
+        return None
+    return n
+
+def v1_effective_memory_limit(path_only: str, results: Dict[str, Dict[str, Any]]) -> Optional[int]:
+    """
+    Compute the effective memory limit applied to a cgroup (bytes or None if unlimited).
+    Rule of thumb for v1:
+      - If hierarchy is enabled up the ancestor chain, the effective limit is min(self, ancestors with limits).
+      - If we encounter an ancestor with memory.use_hierarchy == 0, stop considering ancestors beyond that node.
+    """
+    # Start with this node's raw limit
+    key = f"{path_only}::memory"
+    info = results.get(key)
+    if not info:
+        return None
+    eff = _v1_parse_mem_limit(info["limits"].get("memory.limit_in_bytes"))
+
+    # Walk up while parent's hierarchy is enabled
+    cur = path_only
+    while True:
+        parent = results.get(f"{cur}::memory", {}).get("parent")
+        if not parent:
+            break
+        pinfo = results.get(f"{parent}::memory")
+        if not pinfo:
+            break
+        useh = str(pinfo["limits"].get("memory.use_hierarchy") or "").strip() == "1"
+        if not useh:
+            break
+        plim = _v1_parse_mem_limit(pinfo["limits"].get("memory.limit_in_bytes"))
+        if plim is not None:
+            if eff is None:
+                eff = plim
+            else:
+                eff = min(eff, plim)
+        cur = parent
+    return eff
+
+def v1_effective_cpu_ratio(path_only: str, results: Dict[str, Dict[str, Any]]) -> Optional[float]:
+    """
+    Effective CPU (in CPUs) for v1 cpu controller: hierarchical min of ratios among ancestors
+    that are in 'limit' mode. 'unlimited' is treated as no bound.
+    """
+    key = f"{path_only}::cpu"
+    info = results.get(key)
+    if not info:
+        return None
+    # Start with child's declared ratio (None = unlimited/no bound)
+    mode = info["limits"].get("cpu.mode")
+    ratio = info["limits"].get("cpu.ratio")
+    eff = ratio if mode == "limit" else None
+    cur = path_only
+    while True:
+        parent = results.get(f"{cur}::cpu", {}).get("parent")
+        if not parent:
+            break
+        pinfo = results.get(f"{parent}::cpu")
+        if not pinfo:
+            break
+        pmode = pinfo["limits"].get("cpu.mode")
+        pratio = pinfo["limits"].get("cpu.ratio")
+        if pmode == "limit" and pratio is not None:
+            if eff is None:
+                eff = pratio
+            else:
+                eff = min(eff, pratio)
+        cur = parent
+    return eff
+
+def _v1_parse_pids(val: Optional[str]) -> Optional[int]:
+    """Return None for unlimited (max/None), else integer."""
+    if val is None:
+        return None
+    s = str(val).strip().lower()
+    if s == "max":
+        return None
+    try:
+        return int(s, 10)
+    except Exception:
+        return None
+
+def v1_effective_pids_max(path_only: str, results: Dict[str, Dict[str, Any]]) -> Optional[int]:
+    """
+    Effective pids.max in v1: hierarchical min across ancestors (None=max/unlimited).
+    """
+    key = f"{path_only}::pids"
+    info = results.get(key)
+    if not info:
+        return None
+    eff = _v1_parse_pids(info["limits"].get("pids.max"))
+    cur = path_only
+    while True:
+        parent = results.get(f"{cur}::pids", {}).get("parent")
+        if not parent:
+            break
+        pinfo = results.get(f"{parent}::pids")
+        if not pinfo:
+            break
+        pv = _v1_parse_pids(pinfo["limits"].get("pids.max"))
+        if pv is not None:
+            if eff is None:
+                eff = pv
+            else:
+                eff = min(eff, pv)
+        cur = parent
+    return eff
 
 # ---------------------- "origin of change" helpers ----------------------
 def find_intro_v2(path: str, results: Dict[str, Dict[str, Any]], field: str) -> Tuple[str, Optional[str], Any, Any]:
@@ -386,43 +509,131 @@ def print_v1_detailed_for_path(path_only: str, results: Dict[str, Dict[str, Any]
             p = limits.get("cpu.cfs_period_us")
             mode = limits.get("cpu.mode")
             ratio = limits.get("cpu.ratio")
-            print(f"   child:  quota={q}, period={p}, mode={mode}, effective={cpu_ratio_to_str(ratio)}")
+
+            # Parent first
+            pmode = pratio = pq = pp = None
+            parent_eff_str = None
             if parent:
                 plim = results.get(f"{parent}::{ctrl}", {}).get("limits", {})
                 pmode = plim.get("cpu.mode")
                 pratio = plim.get("cpu.ratio")
                 pq = plim.get("cpu.cfs_quota_us"); pp = plim.get("cpu.cfs_period_us")
+                # Color parent if it's the enforcing cap vs child
+                parent_eff = pratio if pmode == "limit" else None
+                parent_eff_str_raw = cpu_ratio_to_str(parent_eff)
+                if parent_eff is not None and (
+                    (mode != "limit") or (ratio is None) or (ratio > parent_eff + 1e-12)
+                ):
+                    parent_eff_str = c_yellow(parent_eff_str_raw)
+                else:
+                    parent_eff_str = parent_eff_str_raw
                 print(f"   parent: {parent}")
-                print(f"           quota={pq}, period={pp}, mode={pmode}, effective={cpu_ratio_to_str(pratio)}")
+                print(f"           quota={pq}, period={pp}, mode={pmode}, effective={parent_eff_str}")
+
+            # Child with coloring rules (red if ignored, yellow if differs from parent)
+            child_decl = ratio if mode == "limit" else None  # None means unlimited / no bound
+            eff = v1_effective_cpu_ratio(path_only, results)
+            child_decl_str_raw = cpu_ratio_to_str(child_decl)
+            child_str = child_decl_str_raw
+            child_ignored = (eff is not None) and (
+                (child_decl is None) or (child_decl > eff + 1e-12)
+            )
+            child_diff_parent = (child_decl != pratio)  # covers None vs number
+            if child_ignored:
+                child_str = c_red(child_str)
+            elif child_diff_parent:
+                child_str = c_yellow(child_str)
+
+            print(f"   child:  quota={q}, period={p}, mode={mode}, requested={child_str}, effective={cpu_ratio_to_str(eff)}")
+
             ch = (diffs.get('cpu', False)
-                    or diffs.get('cpu.cfs_quota_us', False) or diffs.get('cpu.cfs_period_us', False))
+                  or diffs.get('cpu.cfs_quota_us', False) or diffs.get('cpu.cfs_period_us', False))
             print(f"   changed: {changed_str(ch)}")
             intro, pintro, _, _ = find_intro_v1(path_only, "cpu", results)
             if pintro:
                 print(f"   introduced at: {intro}  (parent {pintro})")
+
         elif ctrl == "memory":
             val = limits.get("memory.limit_in_bytes")
-            print(f"   child:  limit={val} ({human_bytes(val)})")
+            useh = limits.get("memory.use_hierarchy")
+            eff = v1_effective_memory_limit(path_only, results)
+
+            # Precompute parsed numeric limits for comparisons
+            child_val = _v1_parse_mem_limit(val)
+            parent_val = None
+
             if parent:
                 plim = results.get(f"{parent}::{ctrl}", {}).get("limits", {})
                 pv = plim.get("memory.limit_in_bytes")
+                puseh = plim.get("memory.use_hierarchy")
+                parent_val = _v1_parse_mem_limit(pv)
+
+                parent_str = human_bytes(pv)
+                # Highlight parent if it is the enforcing constraint
+                if eff is not None and parent_val is not None and eff == parent_val and (child_val is None or child_val > parent_val):
+                    parent_str = c_yellow(parent_str)
+
                 print(f"   parent: {parent}")
-                print(f"           limit={pv} ({human_bytes(pv)})")
+                print(f"           limit={pv} ({parent_str})")
+                print(f"           use_hierarchy={puseh}")
+
+            # Child coloring rules:
+            #  - RED if child is ignored (looser than effective cap)
+            #  - YELLOW if child differs from parent (but is not ignored)
+            child_str = human_bytes(val)
+            child_ignored = (eff is not None and child_val is not None and child_val > eff)
+            child_diff_parent = (child_val != parent_val)  # treats None (unlimited) naturally
+            if child_ignored:
+                child_str = c_red(child_str)
+            elif child_diff_parent:
+                child_str = c_yellow(child_str)
+
+            print(f"   child:  limit={val} ({child_str})")
+            print(f"           use_hierarchy={useh}")
+
+            # Effective memory limit considering hierarchy
+            eff_str = "unlimited" if eff is None else human_bytes(str(eff))
+            print(f"   effective (applied): {eff_str}")
+
             ch = diffs.get('memory.limit_in_bytes', False)
+            if parent:
+                ch = ch or diffs.get('memory.use_hierarchy', False)
             print(f"   changed: {changed_str(ch)}")
             intro, pintro, _, _ = find_intro_v1(path_only, "memory", results)
             if pintro:
                 print(f"   introduced at: {intro}  (parent {pintro})")
         elif ctrl == "pids":
             val = limits.get("pids.max")
-            pretty = "unlimited" if (val is None or str(val).lower() == "max") else val
-            print(f"   child:  pids.max={val} ({pretty})")
+            eff = v1_effective_pids_max(path_only, results)
+
+            # Parent first (highlight if enforcing cap)
+            parent_val = None
             if parent:
                 plim = results.get(f"{parent}::{ctrl}", {}).get("limits", {})
                 pv = plim.get("pids.max")
-                ppretty = "unlimited" if (pv is None or str(pv).lower() == "max") else pv
+                parent_val = _v1_parse_pids(pv)
+                ppretty = "unlimited" if parent_val is None else parent_val
+                if eff is not None and parent_val is not None and eff == parent_val:
+                    ppretty = c_yellow(str(ppretty))
                 print(f"   parent: {parent}")
                 print(f"           pids.max={pv} ({ppretty})")
+
+            # Child coloring rules (red if ignored, yellow if different from parent)
+            child_val = _v1_parse_pids(val)
+            cpretty_raw = "unlimited" if child_val is None else child_val
+            cpretty = str(cpretty_raw)
+            child_ignored = (eff is not None and (child_val is None or child_val > eff))
+            child_diff_parent = (child_val != parent_val)
+            if child_ignored:
+                cpretty = c_red(cpretty)
+            elif child_diff_parent:
+                cpretty = c_yellow(cpretty)
+            print(f"   child:  pids.max={val} ({cpretty})")
+
+            # Effective applied
+            eff_str = "unlimited" if eff is None else str(eff)
+            print(f"   effective (applied): {eff_str}")
+
             ch = diffs.get('pids.max', False)
             print(f"   changed: {changed_str(ch)}")
             intro, pintro, _, _ = find_intro_v1(path_only, "pids", results)
@@ -436,43 +647,166 @@ def print_v2_detailed_for_path(path: str, results: Dict[str, Dict[str, Any]]) ->
     parent = info.get("parent")
     l = info["limits"]
     print("\n== Detailed limits for:", path)
-    # memory
-    cm = l.get("memory.max")
+
+    # ---------- helpers for v2 effective values ----------
+    def _v2_parse_bytes(val):
+        if val is None:
+            return None
+        s = str(val).strip().lower()
+        if s == "max":
+            return None
+        try:
+            n = int(s, 10)
+        except Exception:
+            return None
+        if n >= (1 << 60):  # treat absurdly large as unlimited
+            return None
+        return n
+
+    def v2_effective_memory_max(p):
+        eff = _v2_parse_bytes(results[p]["limits"].get("memory.max"))
+        cur = p
+        while True:
+            par = results.get(cur, {}).get("parent")
+            if not par or par not in results:
+                break
+            pv = _v2_parse_bytes(results[par]["limits"].get("memory.max"))
+            if pv is not None:
+                eff = pv if eff is None else min(eff, pv)
+            cur = par
+        return eff
+
+    def _v2_parse_pids(val):
+        if val is None:
+            return None
+        s = str(val).strip().lower()
+        if s == "max":
+            return None
+        try:
+            return int(s, 10)
+        except Exception:
+            return None
+
+    def v2_effective_pids_max(p):
+        eff = _v2_parse_pids(results[p]["limits"].get("pids.max"))
+        cur = p
+        while True:
+            par = results.get(cur, {}).get("parent")
+            if not par or par not in results:
+                break
+            pv = _v2_parse_pids(results[par]["limits"].get("pids.max"))
+            if pv is not None:
+                eff = pv if eff is None else min(eff, pv)
+            cur = par
+        return eff
+
+    def v2_effective_cpu_ratio(p):
+        mode = results[p]["limits"].get("cpu.mode")
+        ratio = results[p]["limits"].get("cpu.ratio") if mode == "limit" else None
+        eff = ratio
+        cur = p
+        while True:
+            par = results.get(cur, {}).get("parent")
+            if not par or par not in results:
+                break
+            pmode = results[par]["limits"].get("cpu.mode")
+            pratio = results[par]["limits"].get("cpu.ratio") if pmode == "limit" else None
+            if pratio is not None:
+                eff = pratio if eff is None else min(eff, pratio)
+            cur = par
+        return eff
+
+    # ---------- memory (parent first, with colors & effective) ----------
     print(f"-- memory --")
-    print(f"   child:  memory.max={cm} ({human_bytes(cm)})")
+    cm = l.get("memory.max")
+    child_val = _v2_parse_bytes(cm)
+    pm = None; parent_val = None
     if parent:
         pl = results.get(parent, {}).get("limits", {})
         pm = pl.get("memory.max")
+        parent_val = _v2_parse_bytes(pm)
+        pstr = human_bytes(pm)
+        eff = v2_effective_memory_max(path)
+        if eff is not None and parent_val is not None and eff == parent_val and (child_val is None or child_val > parent_val):
+            pstr = c_yellow(pstr)
         print(f"   parent: {parent}")
-        print(f"           memory.max={pm} ({human_bytes(pm)})")
+        print(f"           memory.max={pm} ({pstr})")
+    eff = v2_effective_memory_max(path)
+    cstr = human_bytes(cm)
+    child_ignored = (eff is not None and child_val is not None and child_val > eff)
+    child_diff_parent = (child_val != parent_val)
+    if child_ignored:
+        cstr = c_red(cstr)
+    elif child_diff_parent:
+        cstr = c_yellow(cstr)
+    print(f"   child:  memory.max={cm} ({cstr})")
+    eff_str = "unlimited" if eff is None else human_bytes(str(eff))
+    print(f"   effective (applied): {eff_str}")
     print(f"   changed: {changed_str(info['diff'].get('memory.max', False))}")
     intro, pintro, _, _ = find_intro_v2(path, results, "memory.max")
     if pintro:
         print(f"   introduced at: {intro}  (parent {pintro})")
 
-    # pids
-    cp = l.get("pids.max")
+    # ---------- pids (parent first, with colors & effective) ----------
     print(f"-- pids --")
-    ppretty = "unlimited" if (cp is None or str(cp).lower() == "max") else cp
-    print(f"   child:  pids.max={cp} ({ppretty})")
+    cp = l.get("pids.max")
+    child_val = _v2_parse_pids(cp)
+    pp = None; parent_val = None
     if parent:
         pl = results.get(parent, {}).get("limits", {})
         pp = pl.get("pids.max")
-        pppretty = "unlimited" if (pp is None or str(pp).lower() == "max") else pp
+        parent_val = _v2_parse_pids(pp)
+        ppretty = "unlimited" if parent_val is None else str(parent_val)
+        effp = v2_effective_pids_max(path)
+        if effp is not None and parent_val is not None and effp == parent_val and (child_val is None or child_val > parent_val):
+            ppretty = c_yellow(ppretty)
         print(f"   parent: {parent}")
-        print(f"           pids.max={pp} ({pppretty})")
+        print(f"           pids.max={pp} ({ppretty})")
+    effp = v2_effective_pids_max(path)
+    cpretty = "unlimited" if child_val is None else str(child_val)
+    child_ignored = (effp is not None and (child_val is None or child_val > effp))
+    child_diff_parent = (child_val != parent_val)
+    if child_ignored:
+        cpretty = c_red(cpretty)
+    elif child_diff_parent:
+        cpretty = c_yellow(cpretty)
+    print(f"   child:  pids.max={cp} ({cpretty})")
+    effp_str = "unlimited" if effp is None else str(effp)
+    print(f"   effective (applied): {effp_str}")
     print(f"   changed: {changed_str(info['diff'].get('pids.max', False))}")
     intro, pintro, _, _ = find_intro_v2(path, results, "pids.max")
     if pintro:
         print(f"   introduced at: {intro}  (parent {pintro})")
 
-    # cpu
+    # ---------- cpu (parent first, with colors & effective) ----------
     print(f"-- cpu --")
-    print(f"   child:  cpu.max={l.get('cpu.max')} (effective {cpu_ratio_to_str(l.get('cpu.ratio'))})")
+    # Parent
+    pratio = None; pmode = None
     if parent:
         pl = results.get(parent, {}).get("limits", {})
+        pmode = pl.get("cpu.mode")
+        pratio = pl.get("cpu.ratio") if pmode == "limit" else None
+        p_eff_str_raw = cpu_ratio_to_str(pratio)
+        # Highlight parent if it caps the child
+        child_mode = l.get("cpu.mode"); child_ratio = l.get("cpu.ratio") if child_mode == "limit" else None
+        if pratio is not None and (child_mode != "limit" or child_ratio is None or child_ratio > pratio + 1e-12):
+            p_eff_str = c_yellow(p_eff_str_raw)
+        else:
+            p_eff_str = p_eff_str_raw
         print(f"   parent: {parent}")
-        print(f"           cpu.max={pl.get('cpu.max')} (effective {cpu_ratio_to_str(pl.get('cpu.ratio'))})")
+        print(f"           cpu.max={pl.get('cpu.max')} (effective {p_eff_str})")
+    # Child
+    effc = v2_effective_cpu_ratio(path)
+    mode = l.get("cpu.mode")
+    ratio = l.get("cpu.ratio") if mode == "limit" else None
+    child_decl_str = cpu_ratio_to_str(ratio)
+    child_ignored = (effc is not None) and ((mode != "limit") or (ratio is None) or (ratio > effc + 1e-12))
+    child_diff_parent = (ratio != pratio)  # None vs float covered
+    if child_ignored:
+        child_decl_str = c_red(child_decl_str)
+    elif child_diff_parent:
+        child_decl_str = c_yellow(child_decl_str)
+    print(f"   child:  cpu.max={l.get('cpu.max')} (requested {child_decl_str}, effective {cpu_ratio_to_str(effc)})")
     print(f"   changed: {changed_str(info['diff'].get('cpu.max', False))}")
     intro, pintro, _, _ = find_intro_v2(path, results, "cpu.max")
     if pintro:
@@ -584,3 +918,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
