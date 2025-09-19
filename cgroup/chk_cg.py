@@ -394,7 +394,8 @@ def print_v1_detailed_for_path(path_only: str, results: Dict[str, Dict[str, Any]
                 pq = plim.get("cpu.cfs_quota_us"); pp = plim.get("cpu.cfs_period_us")
                 print(f"   parent: {parent}")
                 print(f"           quota={pq}, period={pp}, mode={pmode}, effective={cpu_ratio_to_str(pratio)}")
-            ch = (diffs.get('cpu', False) or diffs.get('cpu.cfs_quota_us', False))
+            ch = (diffs.get('cpu', False)
+                    or diffs.get('cpu.cfs_quota_us', False) or diffs.get('cpu.cfs_period_us', False))
             print(f"   changed: {changed_str(ch)}")
             intro, pintro, _, _ = find_intro_v1(path_only, "cpu", results)
             if pintro:
@@ -459,7 +460,7 @@ def print_v2_detailed_for_path(path: str, results: Dict[str, Dict[str, Any]]) ->
         pp = pl.get("pids.max")
         pppretty = "unlimited" if (pp is None or str(pp).lower() == "max") else pp
         print(f"   parent: {parent}")
-        print(f"           pids.max={pp} ({ppprety})")
+        print(f"           pids.max={pp} ({pppretty})")
     print(f"   changed: {changed_str(info['diff'].get('pids.max', False))}")
     intro, pintro, _, _ = find_intro_v2(path, results, "pids.max")
     if pintro:
@@ -571,7 +572,8 @@ def main():
                 print(f"* {key} changed: {', '.join(tags)}")
                 if VERBOSE and not looks_like_specific_unit(UNIT_FILTER):
                     print(f"    limits: {info['limits']} (parent: {info.get('parent')})")
-        if specific:
+        # For v1, allow detailed view for any substring filter (not only *.service/*.scope/*.slice).
+        if UNIT_FILTER:
             paths = sorted({k.split("::",1)[0] for k in results if UNIT_FILTER in k})
             for path_only in paths:
                 print_v1_detailed_for_path(path_only, results)
