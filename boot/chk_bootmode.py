@@ -275,20 +275,20 @@ def detect(reader: SosReader) -> Tuple[str, str, List[str], int]:
             break
 
     if score >= STRONG_UEFI:
-        mode = "UEFI"
-        rc = 0
+        mode, rc = "UEFI", 0
     elif score <= -STRONG_BIOS:
-        mode = "BIOS (Legacy)"
-        rc = 0
+        mode, rc = "BIOS (Legacy)", 0
     else:
-        has_any_uefi_signal = any("efi" in e.lower() or "BootOrder" in e for e in evidence)
+        uefi_patterns = re.compile(
+            r"(?:\bEFI\b|/sys/firmware/efi|efivarfs|/boot/efi|\bBoot(Order|Current)\b)",
+            re.I,
+        )
+        has_any_uefi_signal = any(uefi_patterns.search(e) for e in evidence)
         if not has_any_uefi_signal:
             evidence.append("Heuristic: no EFI signals in mounts/findmnt/dmesg/sysfs → BIOS")
-            mode = "BIOS (Legacy)"
-            rc = 0
+            mode, rc = "BIOS (Legacy)", 0
         else:
-            mode = "Unknown"
-            rc = 2
+            mode, rc = "Unknown", 2
 
     if mode.startswith("BIOS"):
         sb_state = "not-applicable"
@@ -338,3 +338,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
