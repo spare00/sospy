@@ -1,113 +1,147 @@
 #!/usr/bin/env python3
+import os
+import sys
+import argparse
+from typing import Optional, Tuple
 
-import re
+def kb_gb(kb: int) -> str:
+    return f"{kb/1024/1024:4.2f} GB"
 
-def swap_info():
-    with open('proc/meminfo', 'r') as file:
-        content = file.read()
-        swap_total = re.search(r'SwapTotal:\s+(\d+) kB', content)
-        swap_free = re.search(r'SwapFree:\s+(\d+) kB', content)
-        shmem = re.search(r'Shmem:\s+(\d+) kB', content)
-        hugepages_total = re.search(r'HugePages_Total:\s+(\d+)', content)
-        hugepages_free = re.search(r'HugePages_Free:\s+(\d+)', content)
-        hugepagesize = re.search(r'Hugepagesize:\s+(\d+) kB', content)
+def parse_meminfo(path: str) -> dict:
+    out = {}
+    try:
+        with open(path) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    out[parts[0].rstrip(':')] = int(parts[1])
+                elif parts[0].endswith(":"):
+                    out[parts[0].rstrip(':')] = int(parts[1])
+    except FileNotFoundError:
+        pass
+    return out
 
-        swap_total_value = int(swap_total.group(1)) if swap_total else 0
-        swap_free_value = int(swap_free.group(1)) if swap_free else 0
-        shmem_value = int(shmem.group(1)) if shmem else 0
-        hugepages_total_value = int(hugepages_total.group(1)) if hugepages_total else 0
-        hugepages_free_value = int(hugepages_free.group(1)) if hugepages_free else 0
-        hugepagesize_value = int(hugepagesize.group(1)) if hugepagesize else 0
+def parse_shm(path: str) -> Tuple[int, int, int]:
+    vss = rss = swapped = 0
+    try:
+        with open(path) as f:
+            header = f.readline().split()
+            idx_size = header.index("size")
+            idx_rss = header.index("rss")
+            idx_swap = header.index("swap")
+            for line in f:
+                parts = line.split()
+                if len(parts) > idx_swap:
+                    vss += int(parts[idx_size])
+                    rss += int(parts[idx_rss])
+                    swapped += int(parts[idx_swap])
+    except FileNotFoundError:
+        pass
+    return vss // 1024, rss // 1024, swapped // 1024  # convert to KB
 
-        return swap_total_value, swap_free_value, shmem_value, hugepages_total_value, hugepages_free_value, hugepagesize_value
+def parse_df(path: str) -> Optional[int]:
+    try:
+        with open(path) as f:
+            used_total = 0
+            header = f.readline()
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 6 and "tmpfs" in parts[0] and parts[5] != "/dev":
+                    used_total += int(parts[2])  # "Used" column
+            return used_total
+    except FileNotFoundError:
+        return None
 
-def sysv_vss():
-    with open('proc/sysvipc/shm', 'r') as file:
-        next(file)  # Skip the header line
-        sum_vss = sum(int(line.split()[3]) for line in file)
-        return sum_vss
-
-def sysv_rss():
-    with open('proc/sysvipc/shm', 'r') as file:
-        next(file)  # Skip the header line
-        sum_rss = sum(int(line.split()[14]) for line in file)
-        return sum_rss
-
-def sysv_swapped():
-    with open('proc/sysvipc/shm', 'r') as file:
-        next(file)  # Skip the header line
-        sum_swapped = sum(int(line.split()[15]) for line in file)
-        return sum_swapped
-
-def tmpfs():
-    with open('df', 'r') as file:
-        sum_tmpfs_kb = sum(int(line.split()[2]) for line in file if 'tmpfs' in line)
-        return sum_tmpfs_kb
-
-if __name__ == "__main__":
-    swap_total_value, swap_free_value, shmem_value, hugepages_total_value, hugepages_free_value, hugepagesize_value = swap_info()
-    sum_vss = sysv_vss()
-    sum_rss = sysv_rss()
-    sum_swapped = sysv_swapped()
-    sum_tmpfs_kb = tmpfs()
-
-    # Convert values from bytes to kilobytes and GB
-    sum_rss_kb = sum_rss // 1024
-    sum_vss_kb = sum_vss // 1024
-    sum_swapped_kb = sum_swapped // 1024
-    swap_total_gb = swap_total_value / (2**20)
-    swap_free_gb = swap_free_value / (2**20)
-    shmem_gb = shmem_value / (2**20)
-    sum_vss_gb = sum_vss / (2**30)
-    sum_rss_gb = sum_rss / (2**30)
-    sum_swapped_gb = sum_swapped / (2**30)
-    sum_tmpfs_gb = sum_tmpfs_kb / (2**20)
-
-    # Calculate Hugepages_Used
-    hugepages_used_value = (hugepages_total_value - hugepages_free_value) * hugepagesize_value
-    hugepages_used_gb = hugepages_used_value / (2**20)
-
-    used_swap = swap_total_value - swap_free_value
-    total_swappable_shared = sum_rss_kb - hugepages_used_value + sum_tmpfs_kb
-    likely_swapped_out_shared = total_swappable_shared - shmem_value
-    processes_swapped_private_and_shared = used_swap - sum_swapped_kb
-    processes_swapped_private = processes_swapped_private_and_shared - likely_swapped_out_shared
+def main(sosroot: Optional[str] = None, verbose: bool = False) -> None:
+    if sosroot is None:
+        sosroot = "."
 
     print("=======================================")
-    print("           Swap Memory Usage           ")
+    print("         Swap Usage (sosreport)")
     print("=======================================\n")
 
+    # ---- parse /proc/meminfo ----
+    meminfo_path = os.path.join(sosroot, "proc/meminfo")
+    meminfo = parse_meminfo(meminfo_path)
+
+    swap_total = meminfo.get("SwapTotal", 0)
+    swap_free  = meminfo.get("SwapFree", 0)
+    swap_used  = swap_total - swap_free
+    shmem      = meminfo.get("Shmem", 0)
+    huge_total = meminfo.get("HugePages_Total", 0)
+    huge_free  = meminfo.get("HugePages_Free", 0)
+    huge_size  = meminfo.get("Hugepagesize", 0)
+    huge_used  = (huge_total - huge_free) * huge_size
+
     print("From proc/meminfo:")
-    print(f"  SwapTotal:       {swap_total_value:>12} KB ({swap_total_gb:>7.2f} GB)")
-    print(f"  SwapFree:        {swap_free_value:>12} KB ({swap_free_gb:>7.2f} GB)")
-    print(f"  Shmem:           {shmem_value:>12} KB ({shmem_gb:>7.2f} GB)")
-    print(f"  HugePages_Total: {hugepages_total_value:>12} pages")
-    print(f"  HugePages_Free:  {hugepages_free_value:>12} pages")
-    print(f"  Hugepagesize:    {hugepagesize_value:>12} KB")
-    print(f"  Hugepages Used:  {hugepages_used_value:>12} KB ({hugepages_used_gb:>7.2f} GB)")
-    
-    print("\nFrom proc/sysvipc/shm:")
-    print(f"  SysV VSS:        {sum_vss_kb:>12} KB ({sum_vss_gb:>7.2f} GB)")
-    print(f"  SysV RSS:        {sum_rss_kb:>12} KB ({sum_rss_gb:>7.2f} GB)")
-    print(f"  SysV Swapped:    {sum_swapped_kb:>12} KB ({sum_swapped_gb:>7.2f} GB)")
+    print(f"  SwapTotal : {swap_total:12,} KB ({kb_gb(swap_total)})")
+    print(f"  SwapFree  : {swap_free:12,} KB ({kb_gb(swap_free)})")
+    print(f"  SwapUsed  : {swap_used:12,} KB ({kb_gb(swap_used)})")
+    print(f"  Shmem     : {shmem:12,} KB ({kb_gb(shmem)})")
+    print(f"  HugePages_Total: {huge_total:12,} pages")
+    print(f"  HugePages_Free : {huge_free:12,} pages")
+    print(f"  Hugepagesize   : {huge_size:12,} KB")
+    print(f"  Hugepages Used : {huge_used:12,} KB ({kb_gb(huge_used)})\n")
 
-    print("\nFrom df:")
-    print(f"  tmpfs:           {sum_tmpfs_kb:>12} KB ({sum_tmpfs_gb:>7.2f} GB)")
+    # ---- parse df ----
+    df_path = os.path.join(sosroot, "df")
+    tmpfs_used = parse_df(df_path)
+    print("From df (-kP):")
+    print(f"  tmpfs Used : {tmpfs_used:12,} KB ({kb_gb(tmpfs_used)})\n")
 
-    print("\nUsing above data:")
-    print(f"  SwapTotal - SwapFree = Used Swap")
-    print(f"  {swap_total_value} - {swap_free_value} = {used_swap} KB ({used_swap / (2**20):.2f} GB)")
+    # ---- parse shm ----
+    shm_path = os.path.join(sosroot, "proc/sysvipc/shm")
+    sysv_vss, sysv_rss, sysv_swapped = parse_shm(shm_path)
+    print("From proc/sysvipc/shm:")
+    print(f"  SysV VSS     : {sysv_vss:12,} KB ({kb_gb(sysv_vss)})")
+    print(f"  SysV RSS     : {sysv_rss:12,} KB ({kb_gb(sysv_rss)})")
+    print(f"  SysV Swapped : {sysv_swapped:12,} KB ({kb_gb(sysv_swapped)})\n")
 
-    print(f"\n  SysV RSS - Hugepages Used + tmpfs = Total swappable shared")
-    print(f"  {sum_rss_kb} - {hugepages_used_value} + {sum_tmpfs_kb} = {total_swappable_shared} KB ({total_swappable_shared / (2**20):.2f} GB)")
+    # ---- calculations ----
+    likely_swapped_shared = (sysv_rss - huge_used + tmpfs_used) - shmem
+    est_swapped_shared = sysv_swapped + likely_swapped_shared
+    residual_private = swap_used - est_swapped_shared
 
-    print(f"\n  Total swappable shared - Shmem = Likely swapped-out shared")
-    print(f"  {total_swappable_shared} - {shmem_value} = {likely_swapped_out_shared} KB ({likely_swapped_out_shared / (2**20):.2f} GB)")
+    print("Heuristic (practical) inference:")
+    print(f"  Likely swapped shared ((SysV RSS - hugetlb + tmpfs) - Shmem):"
+          f"{likely_swapped_shared:>15,} KB ({kb_gb(likely_swapped_shared):>6})")
+    if verbose:
+        print(f"    {sysv_rss} - {huge_used} + {tmpfs_used} - {shmem}")
 
-    print(f"\n  Used Swap - SysV Swapped = private (swapped from processes) + shared (Mostly swapped tmpfs)")
-    print(f"  {used_swap} - {sum_swapped_kb} = {processes_swapped_private_and_shared} KB ({processes_swapped_private_and_shared / (2**20):.2f} GB)")
+    print(f"  Estimated swapped shared (SysV swapped + Likely swapped shared):"
+          f"{est_swapped_shared:>12,} KB ({kb_gb(est_swapped_shared):>6})")
+    if verbose:
+        print(f"    {sysv_swapped} + {likely_swapped_shared}")
 
-    print(f"\n  private (swapped from processes) + shared (Mostly swapped tmpfs) - Likely swapped-out shared = Likely private (swapped from processes)")
-    print(f"  {processes_swapped_private_and_shared} - {likely_swapped_out_shared} = {processes_swapped_private} KB ({processes_swapped_private / (2**20):.2f} GB)")
+    print(f"  Residual swapped (Used swap - Estimated swapped shared):"
+          f"{residual_private:>20,} KB ({kb_gb(residual_private):>6})")
+    if verbose:
+        print(f"    {swap_used} - {est_swapped_shared}")
 
-    print(f"\nThus, Swap usage ({used_swap / (2**20):.2f} GB) would be like: private memory ({processes_swapped_private / (2**20):.2f} GB) + shared memory (System V IPC: {sum_swapped_gb:.2f} GB + tmpfs: {likely_swapped_out_shared / (2**20):.2f} GB)")
+    print("\nThus, Swap usage "
+          f"({kb_gb(swap_used)}) would be like: private memory "
+          f"({kb_gb(residual_private)}) + shared memory "
+          f"(System V IPC: {kb_gb(sysv_swapped)} + tmpfs: {kb_gb(tmpfs_used)})")
+
+    # ---- diagnostics ----
+    explained = (sysv_rss - huge_used + tmpfs_used)
+    diag_gap = shmem - explained
+    if diag_gap > 0:
+        print("\n[Diag] Shmem exceeds tmpfs+SysV explained share by:")
+        print(f"       {diag_gap:12,} KB ({kb_gb(diag_gap)})")
+        print("       This may include memfd, shm_open, or other shared mappings.")
+
+    print("\nNotes:")
+    print("- Shmem is resident only; swapped pages are not included there.")
+    print("- tmpfs 'Used' is filesystem allocation (resident + swapped).")
+    print("- The 'likely swapped-out shared' is a pragmatic estimate of swapped shared pages.")
+    print("- SysV hugetlb is not swappable and not accounted in Shmem; we do not add SysV sizes.")
+    print("- Without per-process VmSwap, private vs shared split remains approximate.")
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("sosroot", nargs="?", help="sosreport root (default: cwd)")
+    ap.add_argument("-v", "--verbose", action="store_true")
+    args = ap.parse_args()
+    main(args.sosroot, verbose=args.verbose)
+
