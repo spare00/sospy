@@ -97,39 +97,65 @@ def main(sosroot: Optional[str] = None, verbose: bool = False) -> None:
     print(f"  SysV RSS     : {sysv_rss:12,} KB ({kb_gb(sysv_rss)})")
     print(f"  SysV Swapped : {sysv_swapped:12,} KB ({kb_gb(sysv_swapped)})\n")
 
-    # ---- calculations ----
-    likely_swapped_shared = (sysv_rss - huge_used + tmpfs_used) - shmem
+    # ---- calculation logic (restored from legacy script, unit-consistent) ----
+    # Step 1: Total swappable shared (SysV RSS - hugetlb + tmpfs)
+    total_swappable_shared = sysv_rss - huge_used + tmpfs_used
+
+    # Step 2: Likely swapped-out shared (difference between total and Shmem)
+    likely_swapped_shared = total_swappable_shared - shmem
+
+    # Step 3: Processes' total swapped (excluding SysV)
+    proc_swapped_private_and_shared = swap_used - sysv_swapped
+
+    # Step 4: Estimated private swapped portion
+    residual_private = proc_swapped_private_and_shared - likely_swapped_shared
+
+    # Step 5: Estimated swapped shared
     est_swapped_shared = sysv_swapped + likely_swapped_shared
-    residual_private = swap_used - est_swapped_shared
 
+    # ---- verbose intermediate output ----
+    if verbose:
+        print("[Verbose] Intermediate calculation breakdown:")
+
+        print(f"\n  Total swappable shared = SysV RSS - hugetlb + tmpfs")
+        print(f"    = {sysv_rss} - {huge_used} + {tmpfs_used} = {total_swappable_shared} KB ({kb_gb(total_swappable_shared)})")
+
+        print(f"\n  Likely swapped-out shared = Total swappable shared - Shmem")
+        print(f"    = {total_swappable_shared} - {shmem} = {likely_swapped_shared} KB ({kb_gb(likely_swapped_shared)})")
+
+        print(f"\n  Private+shared swapped = Used swap - SysV swapped")
+        print(f"    = {swap_used} - {sysv_swapped} = {proc_swapped_private_and_shared} KB ({kb_gb(proc_swapped_private_and_shared)})")
+
+        print(f"\n  Private swapped = (Private+shared) - Likely swapped-out shared")
+        print(f"    = {proc_swapped_private_and_shared} - {likely_swapped_shared} = {residual_private} KB ({kb_gb(residual_private)})")
+
+        print(f"\n  Estimated swapped shared = SysV swapped + Likely swapped-out shared")
+        print(f"    = {sysv_swapped} + {likely_swapped_shared} = {est_swapped_shared} KB ({kb_gb(est_swapped_shared)})\n")
+
+    # ---- summary heuristic ----
     print("Heuristic (practical) inference:")
-    print(f"  Likely swapped shared ((SysV RSS - hugetlb + tmpfs) - Shmem):"
-          f"{likely_swapped_shared:>15,} KB ({kb_gb(likely_swapped_shared):>6})")
-    if verbose:
-        print(f"    {sysv_rss} - {huge_used} + {tmpfs_used} - {shmem}")
+    print(f"  SysV RSS - hugetlb + tmpfs = Total swappable shared:"
+          f"{total_swappable_shared:>20,} KB ({kb_gb(total_swappable_shared):>7})")
+    print(f"  Total swappable shared - Shmem = Likely swapped-out shared:"
+          f"{likely_swapped_shared:>13,} KB ({kb_gb(likely_swapped_shared):>7})")
+    print(f"  Used swap - SysV swapped = private+shared swapped:"
+          f"{proc_swapped_private_and_shared:>22,} KB ({kb_gb(proc_swapped_private_and_shared):>7})")
+    print(f"  private+shared - likely swapped-out shared = private swapped:"
+          f"{residual_private:>12,} KB ({kb_gb(residual_private):>7})")
 
-    print(f"  Estimated swapped shared (SysV swapped + Likely swapped shared):"
-          f"{est_swapped_shared:>12,} KB ({kb_gb(est_swapped_shared):>6})")
-    if verbose:
-        print(f"    {sysv_swapped} + {likely_swapped_shared}")
+    print(f"\nThus, Swap usage ({kb_gb(swap_used)}) ≈ "
+          f"private ({kb_gb(residual_private)}) + shared "
+          f"(SysV IPC: {kb_gb(sysv_swapped)} + tmpfs: {kb_gb(likely_swapped_shared)})")
 
-    print(f"  Residual swapped (Used swap - Estimated swapped shared):"
-          f"{residual_private:>20,} KB ({kb_gb(residual_private):>6})")
-    if verbose:
-        print(f"    {swap_used} - {est_swapped_shared}")
-
-    print("\nThus, Swap usage "
-          f"({kb_gb(swap_used)}) would be like: private memory "
-          f"({kb_gb(residual_private)}) + shared memory "
-          f"(System V IPC: {kb_gb(sysv_swapped)} + tmpfs: {kb_gb(tmpfs_used)})")
-
-    # ---- diagnostics ----
-    explained = (sysv_rss - huge_used + tmpfs_used)
+    # ---- diagnostic section ----
+    explained = sysv_rss - huge_used + tmpfs_used
     diag_gap = shmem - explained
     if diag_gap > 0:
         print("\n[Diag] Shmem exceeds tmpfs+SysV explained share by:")
         print(f"       {diag_gap:12,} KB ({kb_gb(diag_gap)})")
         print("       This may include memfd, shm_open, or other shared mappings.")
+    elif residual_private < 0:
+        print("\n[Diag] Negative residual swap: Shared memory dominates swap usage (likely tmpfs-heavy workload).")
 
     print("\nNotes:")
     print("- Shmem is resident only; swapped pages are not included there.")
