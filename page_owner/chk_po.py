@@ -611,7 +611,7 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
         print(f"No call traces found for process '{filter_by_process}'")
         return
 
-    sorted_traces = sorted(filtered_stats.items(), key=lambda x: x[1]['count'], reverse=True)[:top_n]
+    sorted_traces = sorted(filtered_stats.items(), key=lambda x: x[1]['pages'], reverse=True)[:top_n]
     for i, (key, data) in enumerate(sorted_traces, 1):
         mem, unit_label = convert_pages(data['pages'], unit)
         print(f"#{i}: Seen {data['count']} times, {mem:.2f} {unit_label}")
