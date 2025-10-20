@@ -112,7 +112,8 @@ def scan_mokutil_file(text: str, ev: List[str]) -> str:
         ev.append(f"mokutil file: SecureBoot {state}")
         return state
     if "EFI variables are not supported on this system" in text:
-        ev.append("mokutil file: 'EFI variables are not supported' (BIOS context)")
+        ev.append("mokutil file: 'EFI variables are not supported' (BIOS)")
+        return "bios"
     return "unknown"
 
 def scan_mounts_text(text: str, ev: List[str]) -> int:
@@ -230,6 +231,8 @@ def detect(reader: SosReader) -> Tuple[str, str, List[str], int]:
             mokutil_sb = scan_mokutil_file(txt, evidence)
             if mokutil_sb in {"enabled","disabled"}:
                 score += STRONG_UEFI
+            elif mokutil_sb == "bios":
+                score -= STRONG_BIOS
             break
 
     for p in candidates["mounts"]:
