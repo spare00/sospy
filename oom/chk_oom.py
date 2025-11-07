@@ -120,7 +120,7 @@ def memory_summary_not_available(*args, **kwargs):
 def main():
     parser = argparse.ArgumentParser(description="Parse OOM logs and display memory summaries and process usage.")
 
-    group = parser.add_mutually_exclusive_group(required=True)
+    group = parser.add_mutually_exclusive_group()
     group.add_argument('-i', '--meminfo', action='store_true', help='Show memory usage summary (Mem-Info)')
     group.add_argument('-p', '--processes', action='store_true', help='Show top memory-consuming processes (from OOM dump)')
 
@@ -136,6 +136,10 @@ def main():
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('log_file', type=str, help='Path to OOM log file')
     args = parser.parse_args()
+
+    # Default to --processes mode if neither is explicitly set
+    if not args.meminfo and not args.processes:
+        args.processes = True
 
     if args.processes:
         events = parse_oom_log(args.log_file)
