@@ -201,7 +201,7 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
     return memory_summary, total_memory_pages, unaccounted_pages
 
 def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timestamp,
-                  unit='G', pagesize_kb=4, show_unaccounted=False, verbose=False):
+                  unit='G', pagesize_kb=4, show_unaccounted=True, verbose=False):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
 
     unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'GB')
@@ -236,7 +236,6 @@ def main():
     # Define the flags
     parser.add_argument('--pagesize', type=int, default=4, help="Page size in KB (default: 4)")
 
-    parser.add_argument('-u', '--unaccounted', action='store_true', help="Show unaccounted memory.")
     parser.add_argument('-f', '--full', action='store_true', help="Show full memory info.")
     parser.add_argument('-v', '--verbose', action='store_true', help="Show verbose memory info.")
     parser.add_argument('log_filename', metavar='log_filename', type=str, help="Log file to parse.")
@@ -244,7 +243,7 @@ def main():
     # Parse arguments
     args = parser.parse_args()
     pagesize_kb = args.pagesize
-    show_unaccounted = args.unaccounted
+    show_unaccounted = True; #args.unaccounted
     show_full = args.full
     log_filename = args.log_filename
     verbose = args.verbose
