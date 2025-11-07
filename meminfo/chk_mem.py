@@ -162,6 +162,8 @@ def calculate_unaccounted(meminfo, show_anonpages):
             continue
         if field in ("HugePages_Total", "Hugepagesize"):
             continue
+        if field == "Shmem":
+            continue  # Exclude Shmem to avoid double-counting (already in Cached)
         if field in meminfo:
             accounted_fields.append(field)
     if "HugePages" in meminfo:
@@ -189,7 +191,12 @@ def print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, v
     print("=" * len(header))
     print(f"{'MemTotal:':<20} {scale_value(total, unit):>20.2f}")
     for key in accounted_fields:
-        print(f"{key:<20} {scale_value(meminfo[key], unit):>20.2f}")
+        value = scale_value(meminfo[key], unit)
+        if key == "Cached" and "Shmem" in meminfo:
+            shmem_val = scale_value(meminfo["Shmem"], unit)
+            print(f"{key:<20} {value:>20.2f} (Inc Shmem {shmem_val:.2f})")
+        else:
+            print(f"{key:<20} {value:>20.2f}")
 
     # Extra fields for verbose
     if verbose:
