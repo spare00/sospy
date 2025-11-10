@@ -224,9 +224,6 @@ def parse_args():
         help="Enable debug output (paths, hugepages, fallback logic)"
     )
 
-    parser.add_argument("-u", "--unaccounted", dest="unaccounted", action="store_true", default=True,
-        help="Include unaccounted memory calculation (default: enabled)")
-
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-K", action="store_const", const="K", dest="unit", help="Display memory in KiB")
     group.add_argument("-M", action="store_const", const="M", dest="unit", help="Display memory in MiB (default)")
@@ -242,9 +239,8 @@ def main():
     show_anonpages = compute_anonpages(meminfo)
     compute_hugepages(meminfo, debug=args.debug)
 
-    if args.unaccounted:
-        total, accounted_sum, unaccounted, accounted_fields = calculate_unaccounted(meminfo, show_anonpages)
-        print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, args.verbose, show_anonpages, args.unit)
+    total, accounted_sum, unaccounted, accounted_fields = calculate_unaccounted(meminfo, show_anonpages)
+    print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, args.verbose, show_anonpages, args.unit)
 
 if __name__ == "__main__":
     main()
