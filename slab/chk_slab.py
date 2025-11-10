@@ -12,7 +12,7 @@ def parse_slabinfo(file_path):
             lines = file.readlines()
 
         slab_data = []
-        total_memory_mib = 0
+        total_memory_kib = 0
 
         for line in lines[2:]:  # Skip headers
             fields = line.split()
@@ -26,12 +26,11 @@ def parse_slabinfo(file_path):
             except ValueError:
                 continue
 
-            memory_usage_mib = pagesperslab * num_slabs * PAGE_SIZE_KB / 1024
-            slab_data.append((memory_usage_mib, name))
-            total_memory_mib += memory_usage_mib
+            memory_usage_kib = pagesperslab * num_slabs * PAGE_SIZE_KB
+            slab_data.append((memory_usage_kib, name))
+            total_memory_kib += memory_usage_kib
 
-        # Always return full data, selection is handled separately
-        return slab_data, total_memory_mib
+        return slab_data, total_memory_kib
 
     except FileNotFoundError:
         print(f"Error: File '{file_path}' not found.", file=sys.stderr)
@@ -40,34 +39,64 @@ def parse_slabinfo(file_path):
         print(f"Error processing the file: {e}", file=sys.stderr)
         sys.exit(1)
 
-def format_slab_data(slab_data, total_memory_mib):
+def format_slab_data(slab_data, total_memory_kib, unit):
     result = []
-    header = f"{'Memory (MiB)':>15} | {'Slab Name':<20}"
+
+    # Conversion factor and label
+    if unit == "K":
+        factor = 1
+        label = "KiB"
+        total_label = "KiB"
+    elif unit == "M":
+        factor = 1 / 1024
+        label = "MiB"
+        total_label = "MiB"
+    else:
+        factor = 1 / (1024 * 1024)
+        label = "GiB"
+        total_label = "GB"
+
+    header = f"{f'Memory ({label})':>15} | {'Slab Name':<20}"
     separator = "-" * len(header)
     result.append(header)
     result.append(separator)
 
-    for size_mib, name in slab_data:
-        result.append(f"{size_mib:15.1f} | {name:<30}")
+    for size_kib, name in slab_data:
+        size = size_kib * factor
+        result.append(f"{size:15.1f} | {name:<30}")
 
-    total_memory_gb = total_memory_mib / 1024
+    total = total_memory_kib * factor
     result.append(separator)
-    result.append(f"{'Total':>15} | {total_memory_mib:.1f} MiB ({total_memory_gb:.2f} GB)")
+    result.append(f"{'Total':>15} | {total_memory_kib * factor:.1f} {total_label}")
 
     return result
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze and display slab memory usage.")
     parser.add_argument("file", nargs="?", default="proc/slabinfo", help="Path to the slabinfo file (default: /proc/slabinfo).")
+    
     group = parser.add_mutually_exclusive_group()
     group.add_argument("-a", "--all", action="store_true", help="Show all slabs.")
     group.add_argument("-l", "--top", type=int, nargs="?", const=DEFAULT_TOP_N,
                        help=f"Show top N slabs by memory usage (default: {DEFAULT_TOP_N}).")
+    
+    unit_group = parser.add_mutually_exclusive_group()
+    unit_group.add_argument("-K", "--kib", action="store_true", help="Display memory in KiB.")
+    unit_group.add_argument("-M", "--mib", action="store_true", help="Display memory in MiB.")
+    unit_group.add_argument("-G", "--gib", action="store_true", help="Display memory in GiB (default).")
 
     args = parser.parse_args()
 
+    # Determine display unit
+    if args.kib:
+        unit = "K"
+    elif args.mib:
+        unit = "M"
+    else:
+        unit = "G"
+
     # Get slabinfo data
-    slab_data, total_memory_mib = parse_slabinfo(args.file)
+    slab_data, total_memory_kib = parse_slabinfo(args.file)
 
     # Determine how many entries to show
     if args.all:
@@ -77,7 +106,7 @@ def main():
         display_data = sorted(slab_data, key=lambda x: x[0], reverse=True)[:top_n]
 
     # Print formatted result
-    formatted_data = format_slab_data(display_data, total_memory_mib)
+    formatted_data = format_slab_data(display_data, total_memory_kib, unit)
     for line in formatted_data:
         print(line)
 
