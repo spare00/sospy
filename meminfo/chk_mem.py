@@ -1,247 +1,206 @@
 #!/usr/bin/env python3
 
-import sys
-import re
 import os
 import argparse
-
-DEFAULT_MEMINFO = "proc/meminfo"
-
-FIELDS = [
-    "MemTotal", "MemFree", "Buffers", "Cached", "SwapCached",
-    "Active(anon)", "Inactive(anon)", "AnonPages",
-    "Unevictable", "Slab", "KernelStack", "Shmem",
-    "PageTables", "Percpu",
-    "HugePages_Total", "Hugepagesize", "Hugetlb"
-]
-
-FIELDS_EXTRA = [
-    "SReclaimable", "SUnreclaim"
-]
+from typing import Optional, Tuple
 
 def scale_value(kb, unit):
     if unit == "K": return kb
     if unit == "M": return kb / 1024
     if unit == "G": return kb / (1024 * 1024)
 
-def size_str_to_kb(size_str):
-    if not size_str:
-        return None
+def parse_meminfo(path: str) -> dict:
+    out = {}
     try:
-        if size_str.endswith("G"):
-            return int(size_str[:-1]) * 1024 * 1024
-        elif size_str.endswith("M"):
-            return int(size_str[:-1]) * 1024
-        elif size_str.endswith("K"):
-            return int(size_str[:-1])
-    except:
+        with open(path) as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and parts[1].isdigit():
+                    out[parts[0].rstrip(':')] = int(parts[1])
+    except FileNotFoundError:
         pass
-    return None
+    return out
 
-def parse_meminfo(path, verbose=False):
-    if not os.path.isfile(path):
-        print(f"Error: File not found: {path}")
-        sys.exit(1)
+def parse_sysvipc_shm(path: str) -> Tuple[int, int, int]:
+    vss = rss = swapped = 0
+    try:
+        with open(path) as f:
+            header = f.readline().split()
+            idx_size = header.index("size")
+            idx_rss = header.index("rss")
+            idx_swap = header.index("swap")
+            for line in f:
+                parts = line.split()
+                if len(parts) > max(idx_size, idx_rss, idx_swap):
+                    vss += int(parts[idx_size])
+                    rss += int(parts[idx_rss])
+                    swapped += int(parts[idx_swap])
+    except FileNotFoundError:
+        pass
+    return vss // 1024, rss // 1024, swapped // 1024
 
-    meminfo = {}
-    with open(path, 'r') as f:
-        for line in f:
-            parts = line.split()
-            if len(parts) < 2:
-                continue
-            key = parts[0].rstrip(':')
-            if key in FIELDS:
-                try:
-                    meminfo[key] = int(parts[1])
-                except ValueError:
-                    if verbose:
-                        print(f"Skipping line due to non-integer value: {line.strip()}")
-            if verbose:
-                if key in FIELDS_EXTRA:
-                    try:
-                        meminfo[key] = int(parts[1])
-                    except ValueError:
-                        if verbose:
-                            print(f"Skipping line due to non-integer value: {line.strip()}")
+def parse_tmpfs_df(path: str) -> Optional[int]:
+    try:
+        with open(path) as f:
+            used_total = 0
+            _ = f.readline()
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 6 and "tmpfs" in parts[0] and parts[5] != "/dev":
+                    used_total += int(parts[2])
+            return used_total
+    except FileNotFoundError:
+        return None
 
+def calculate_unaccounted(meminfo):
+    total = meminfo.get("MemTotal", 0)
+    fields = [
+        "MemFree", "Buffers", "Cached", "SwapCached",
+        "AnonPages", "Slab", "KernelStack",
+        "PageTables", "Percpu", "Hugetlb"
+    ]
+    accounted_sum = sum(meminfo.get(field, 0) for field in fields)
+    return total, accounted_sum, total - accounted_sum, fields
 
-    return meminfo
+def print_simple(meminfo, unit):
+    """Simplified version for a standalone /proc/meminfo file"""
+    unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}[unit]
+    def show(label, value, extra=None):
+        line = f"{label:<30} {scale_value(value, unit):>10.2f}"
+        if extra:
+            line += f"  ({extra})"
+        print(line)
 
-def compute_anonpages(meminfo):
-    if "AnonPages" in meminfo:
-        return True  # show_anonpages = True
-    if "Active(anon)" in meminfo and "Inactive(anon)" in meminfo:
-        meminfo["AnonPages"] = meminfo["Active(anon)"] + meminfo["Inactive(anon)"]
-        return False  # show_anonpages = False
-    print("Error: AnonPages is not available and cannot be calculated.")
-    sys.exit(1)
+    active_anon = meminfo.get("Active(anon)", 0)
+    inactive_anon = meminfo.get("Inactive(anon)", 0)
+    anon_shared_kb = max((active_anon + inactive_anon) - meminfo.get("AnonPages", 0), 0)
+    anon_extra_text = f"anon shared={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
 
-def parse_cmdline_hugepages():
-    hugepages = None
-    hugepagesz = None
-    default_hugepagesz = None
+    huge_total = meminfo.get("HugePages_Total", 0)
+    huge_free = meminfo.get("HugePages_Free", 0)
+    huge_size = meminfo.get("Hugepagesize", 0)
+    huge_total_kb = huge_total * huge_size
+    huge_used_kb = (huge_total - huge_free) * huge_size
 
-    cmdline_path = "proc/cmdline"
-    if not os.path.isfile(cmdline_path):
-        return None, None
+    swap_total = meminfo.get("SwapTotal", 0)
+    swap_free = meminfo.get("SwapFree", 0)
+    swap_used = max(swap_total - swap_free, 0)
 
-    with open(cmdline_path, "r") as f:
-        cmdline = f.read()
+    total, accounted, unaccounted, _ = calculate_unaccounted(meminfo)
 
-    match = re.search(r"hugepages=(\d+)", cmdline)
-    if match:
-        hugepages = int(match.group(1))
+    print(f"{'Field':<30} {'Size (' + unit_label + ')':>10}")
+    print("=" * 42)
+    show("MemTotal:", meminfo.get("MemTotal", 0))
+    show("MemFree", meminfo.get("MemFree", 0))
+    show("Buffers", meminfo.get("Buffers", 0))
+    show("Cached", meminfo.get("Cached", 0))
+    show("SwapCached", meminfo.get("SwapCached", 0))
+    show("AnonPages", meminfo.get("AnonPages", 0), anon_extra_text)
+    show("  Active(anon)", active_anon)
+    show("  Inactive(anon)", inactive_anon)
+    show("Slab", meminfo.get("Slab", 0))
+    show("KernelStack", meminfo.get("KernelStack", 0))
+    show("PageTables", meminfo.get("PageTables", 0))
+    show("Percpu", meminfo.get("Percpu", 0))
+    show("HugePages_Total", huge_total_kb)
+    show("HugePagesUsed", huge_used_kb)
+    show("SwapTotal", swap_total)
+    show("SwapUsed", swap_used)
+    print("=" * 42)
+    show("Unaccounted:", total - accounted, unit_label)
 
-    match = re.search(r"default_hugepagesz=(\S+)", cmdline)
-    if match:
-        default_hugepagesz = match.group(1)
+def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
+    unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}[unit]
+    def show(label, value, extra=None):
+        line = f"{label:<30} {scale_value(value, unit):>10.2f}"
+        if extra:
+            line += f"  ({extra})"
+        print(line)
 
-    match = re.search(r"hugepagesz=(\S+)", cmdline)
-    if match:
-        hugepagesz = match.group(1)
+    huge_total = meminfo.get("HugePages_Total", 0)
+    huge_free = meminfo.get("HugePages_Free", 0)
+    huge_size = meminfo.get("Hugepagesize", 0)
+    huge_total_kb = huge_total * huge_size
+    hugetlb_used_kb = (huge_total - huge_free) * huge_size
 
-    # Prefer explicit size
-    size = hugepagesz or default_hugepagesz
-    return hugepages, size
+    non_hugetlb_sysv_rss = max(sysv_rss_kb - hugetlb_used_kb, 0)
+    tmpfs_used = tmpfs_used or 0
 
-def compute_hugepages(meminfo, debug=False):
-    note = ""
-    # Priority 1: Use Hugetlb directly from meminfo (RHEL8+)
-    if "Hugetlb" in meminfo:
-        meminfo["HugePages"] = meminfo["Hugetlb"]
-        if debug:
-            print(f"DEBUG: Using 'Hugetlb' from meminfo: {meminfo['HugePages']} KiB")
-        return
+    shmem_kb = meminfo.get("Shmem", 0)
+    shmem_extra_kb = max(non_hugetlb_sysv_rss + tmpfs_used - shmem_kb, 0)
+    shmem_extra_text = f"extra={scale_value(shmem_extra_kb, unit):.2f} {unit_label}"
 
-    # Priority 2: Use kernel cmdline hints
-    hugepages, size_str = parse_cmdline_hugepages()
-    size_kb = size_str_to_kb(size_str)
+    active_anon = meminfo.get("Active(anon)", 0)
+    inactive_anon = meminfo.get("Inactive(anon)", 0)
+    anon_shared_kb = max((active_anon + inactive_anon) - meminfo.get("AnonPages", 0), 0)
+    anon_extra_text = f"anon shared={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
 
-    if debug:
-        if size_kb and size_kb > 2048:
-            print(f"DEBUG: from cmdline: hugepagesz:: \033[91m{size_kb}\033[0m")
-        else:
-            print(f"DEBUG: from cmdline: hugepagesz:: {size_kb}")
-    if hugepages is not None and size_kb is not None:
-        meminfo["HugePages"] = hugepages * size_kb
-        if debug:
-            print(f"DEBUG: Calculated HugePages from cmdline: {hugepages} × {size_kb} KiB = {meminfo['HugePages']} KiB")
-        return
+    print(f"{'Field':<30} {'Size (' + unit_label + ')':>10}")
+    print("=" * 42)
+    show("MemTotal:", meminfo.get("MemTotal", 0))
+    show("MemFree", meminfo.get("MemFree", 0))
+    show("Buffers", meminfo.get("Buffers", 0))
 
-    # Priority 3: Fallback to sysfs (only if size known)
-    if size_kb:
-        sys_path = os.path.join(root, f"sys/kernel/mm/hugepages/hugepages-{size_kb}kB/nr_hugepages")
-        if os.path.isfile(sys_path):
-            try:
-                with open(sys_path) as f:
-                    count = int(f.read().strip())
-                    meminfo["HugePages"] = count * size_kb
-                    if debug:
-                        print(f"DEBUG: Fallback sysfs HugePages: {count} × {size_kb} KiB = {meminfo['HugePages']} KiB")
-                    return
-            except Exception as e:
-                print(f"Error reading {sys_path}: {e}")
+    cached = meminfo.get("Cached", 0)
+    show("Cached", cached)
+    show("  pagecache", cached - shmem_kb)
+    show("  Shmem", shmem_kb, shmem_extra_text)
+    show("    SysV (non-Hugetlb)", non_hugetlb_sysv_rss)
+    show("    tmpfs", tmpfs_used)
 
-    # If all fail
-    print("Warning: HugePages usage could not be determined.")
-    meminfo["HugePages"] = 0
+    show("SwapCached", meminfo.get("SwapCached", 0))
+    show("AnonPages", meminfo.get("AnonPages", 0), anon_extra_text)
+    show("  Active(anon)", active_anon)
+    show("  Inactive(anon)", inactive_anon)
+    show("Slab", meminfo.get("Slab", 0))
+    show("KernelStack", meminfo.get("KernelStack", 0))
+    show("PageTables", meminfo.get("PageTables", 0))
+    show("Percpu", meminfo.get("Percpu", 0))
+    show("HugePages_Total", huge_total_kb)
+    show("HugePagesUsed", hugetlb_used_kb)
 
-def calculate_unaccounted(meminfo, show_anonpages):
-    total = meminfo.get("MemTotal")
-    if total is None:
-        print("Error: MemTotal not found.")
-        sys.exit(1)
+    swap_total = meminfo.get("SwapTotal", 0)
+    swap_free = meminfo.get("SwapFree", 0)
+    swap_used = max(swap_total - swap_free, 0)
+    show("SwapTotal", swap_total)
+    show("SwapUsed", swap_used)
+    print("=" * 42)
 
-    accounted_fields = []
-    for field in FIELDS:
-        if field in ("MemTotal", "Unevictable", "Hugetlb"):
-            continue
-        if field == "AnonPages" and not show_anonpages:
-            continue
-        if field in ("Active(anon)", "Inactive(anon)") and show_anonpages:
-            continue
-        if field in ("HugePages_Total", "Hugepagesize"):
-            continue
-        if field == "Shmem":
-            continue  # Exclude Shmem to avoid double-counting (already in Cached)
-        if field in meminfo:
-            accounted_fields.append(field)
-    if "HugePages" in meminfo:
-        accounted_fields.append("HugePages")
-
-    accounted_sum = sum(meminfo[field] for field in accounted_fields)
-    return total, accounted_sum, total - accounted_sum, accounted_fields
-
-def print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, verbose, show_anonpages, unit):
-    unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}.get(unit, "MiB")
-
+    total, accounted, unaccounted, fields = calculate_unaccounted(meminfo)
     if verbose:
-        # Header line for formula
-        formula_fields = " - ".join(accounted_fields)
-        values_line = " - ".join(f"{scale_value(meminfo[field], unit):.2f}" for field in accounted_fields)
-        print("Formula used for calculation:")
-        print(f"  Unaccounted Memory = MemTotal - {formula_fields}")
-        print(f"  {scale_value(unaccounted, unit):.2f} = {scale_value(total, unit):.2f} - {values_line}\n")
+        print("\nFormula used for calculation:")
+        print("  Unaccounted Memory = MemTotal - " + " - ".join(fields))
+        total_val = scale_value(meminfo.get("MemTotal", 0), unit)
+        values = [scale_value(meminfo.get(f, 0), unit) for f in fields]
+        expr = " - ".join(f"{v:.2f}" for v in values)
+        result = scale_value(unaccounted, unit)
+        print(f"  {result:.2f} = {total_val:.2f} - {expr}\n")
 
-        # Final summary
-        print(f"{'Unaccounted:':<20} {scale_value(unaccounted, unit):>20.2f} ({unit_label})\n")
-
-    header = f"{'Field':<20} {'Size (' + unit_label + ')':>20}"
-    print(header)
-    print("=" * len(header))
-    print(f"{'MemTotal:':<20} {scale_value(total, unit):>20.2f}")
-    for key in accounted_fields:
-        value = scale_value(meminfo[key], unit)
-        if key == "Cached" and "Shmem" in meminfo:
-            shmem_val = scale_value(meminfo["Shmem"], unit)
-            print(f"{key:<20} {value:>20.2f} (Inc Shmem {shmem_val:.2f})")
-        else:
-            print(f"{key:<20} {value:>20.2f}")
-
-    # Extra fields for verbose
-    if verbose:
-        for key in FIELDS_EXTRA:
-            if key in meminfo:
-                print(f"{key:<20} {scale_value(meminfo[key], unit):>20.2f}")
-
-    print("=" * len(header))
-    print(f"{'Unaccounted:':<20} {scale_value(unaccounted, unit):>20.2f}\n")
-
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Calculate unaccounted memory from proc/meminfo or a custom file."
-    )
-    parser.add_argument(
-        "filename", nargs="?", default=DEFAULT_MEMINFO,
-        help="Path to the meminfo file (default: proc/meminfo)"
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="store_true",
-        help="Enable verbose output"
-    )
-    parser.add_argument(
-        "-d", "--debug", action="store_true",
-        help="Enable debug output (paths, hugepages, fallback logic)"
-    )
-
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("-K", action="store_const", const="K", dest="unit", help="Display memory in KiB")
-    group.add_argument("-M", action="store_const", const="M", dest="unit", help="Display memory in MiB (default)")
-    group.add_argument("-G", action="store_const", const="G", dest="unit", help="Display memory in GiB")
-    parser.set_defaults(unit="G")
-
-    return parser.parse_args()
+    show("Unaccounted:", unaccounted, unit_label)
 
 def main():
-    args = parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-K", action="store_const", const="K", dest="unit", help="Show output in KiB")
+    parser.add_argument("-M", action="store_const", const="M", dest="unit", help="Show output in MiB")
+    parser.add_argument("-G", action="store_const", const="G", dest="unit", help="Show output in GiB")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Show formula for unaccounted memory")
+    parser.add_argument("path", nargs="?", help="sosreport root or /proc/meminfo file (default: cwd)")
+    args = parser.parse_args()
 
-    meminfo = parse_meminfo(args.filename, args.verbose)
-    show_anonpages = compute_anonpages(meminfo)
-    compute_hugepages(meminfo, debug=args.debug)
+    path = args.path or "."
+    unit = args.unit or "G"
 
-    total, accounted_sum, unaccounted, accounted_fields = calculate_unaccounted(meminfo, show_anonpages)
-    print_report(meminfo, total, accounted_fields, accounted_sum, unaccounted, args.verbose, show_anonpages, args.unit)
+    # Detect meminfo-only mode
+    if os.path.isfile(path) and os.path.basename(path) == "meminfo":
+        meminfo = parse_meminfo(path)
+        print_simple(meminfo, unit)
+        return
+
+    sosroot = path
+    meminfo = parse_meminfo(os.path.join(sosroot, "proc/meminfo"))
+    tmpfs_used = parse_tmpfs_df(os.path.join(sosroot, "df"))
+    _, sysv_rss, _ = parse_sysvipc_shm(os.path.join(sosroot, "proc/sysvipc/shm"))
+    print_detailed(meminfo, tmpfs_used, sysv_rss, unit, args.verbose)
 
 if __name__ == "__main__":
     main()
-
