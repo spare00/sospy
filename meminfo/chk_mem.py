@@ -73,8 +73,12 @@ def print_simple(meminfo, unit):
 
     active_anon = meminfo.get("Active(anon)", 0)
     inactive_anon = meminfo.get("Inactive(anon)", 0)
+    anonpages = meminfo.get("AnonPages", 0)
+    shmem = meminfo.get("Shmem", 0)
+
+    # no tmpfs/sysv breakdown in this mode
     anon_shared_kb = max((active_anon + inactive_anon) - meminfo.get("AnonPages", 0), 0)
-    anon_extra_text = f"anon shared={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
+    anon_extra_text = f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
 
     huge_total = meminfo.get("HugePages_Total", 0)
     huge_free = meminfo.get("HugePages_Free", 0)
@@ -132,8 +136,11 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
 
     active_anon = meminfo.get("Active(anon)", 0)
     inactive_anon = meminfo.get("Inactive(anon)", 0)
-    anon_shared_kb = max((active_anon + inactive_anon) - meminfo.get("AnonPages", 0), 0)
-    anon_extra_text = f"anon shared={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
+    anonpages = meminfo.get("AnonPages", 0)
+    anon_diff = (active_anon + inactive_anon) - anonpages
+    anon_shared_kb = anon_diff if anon_diff > 0 else 0
+
+    anon_extra_text = f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
 
     print(f"{'Field':<30} {'Size (' + unit_label + ')':>10}")
     print("=" * 42)
@@ -204,3 +211,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
