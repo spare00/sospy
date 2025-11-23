@@ -54,7 +54,7 @@ MODULE_ALLOC_LIKE_RE = re.compile(
 
 # Header regexes for quick detection
 HDR_WITH_PID_RE = re.compile(
-    r"^Page\s+allocated\s+via\s+order\s+\d+,\s*mask\s+0x[0-9a-fA-F]+.*?,\s*pid\s+\d+,\s*tgid\s+\d+\s*\([^)]+\)\s*,\s*ts\s+\d+(?:\s*ns)?\s*$"
+    r"^Page\s+allocated\s+via\s+order\s+\d+,\s*mask\s+0x[0-9a-fA-F]+.*?,\s*pid\s+\d+,\s*tgid\s+\d+\s*\([^)]+\)\s*,\s*ts\s+\d+(?:\s*ns)?.*"
 )
 HDR_ANY_RE = re.compile(
     r"^Page\s+allocated\s+via\s+order\s+\d+,\s*mask\s+0x[0-9a-fA-F]"
