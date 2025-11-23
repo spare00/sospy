@@ -153,6 +153,8 @@ def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
     Ignores stacks entirely.
     """
     order_stats = defaultdict(lambda: {'allocs': 0, 'pages': 0})
+    alloc_idx = 0
+
     # bigger buffer helps for huge files
     with open(path, 'r', encoding='utf-8', errors='replace', buffering=1024*1024) as f:
         for raw in f:
