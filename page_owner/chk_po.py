@@ -604,6 +604,7 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
         allowed_keys = process_to_traces.get(filter_by_process, set())
         for alloc in allocations:
             if alloc['process'] == filter_by_process and alloc['trace_key'] in allowed_keys:
+                w = alloc.get('weight', 1)
                 filtered_stats[alloc['trace_key']]['count'] += w
                 filtered_stats[alloc['trace_key']]['pages'] += alloc['pages']
     else:
