@@ -52,14 +52,46 @@ def parse_tmpfs_df(path: str) -> Optional[int]:
     except FileNotFoundError:
         return None
 
+def get_hugepages_used_kb(meminfo: dict) -> int:
+    """
+    Returns the amount of memory used by HugePages in KiB.
+    Tries 'Hugetlb' field first; if missing, falls back to calculation.
+    """
+    if "Hugetlb" in meminfo:
+        return meminfo["Hugetlb"]
+
+    huge_total = meminfo.get("HugePages_Total", 0)
+    huge_free = meminfo.get("HugePages_Free", 0)
+    huge_size = meminfo.get("Hugepagesize", 0)
+
+    used_kb = (huge_total - huge_free) * huge_size
+    return used_kb
+
+def get_hugepages_reserved_kb(meminfo: dict) -> int:
+    """
+    Returns the total memory reserved for HugePages in KiB.
+    This is HugePages_Total * Hugepagesize.
+    """
+    huge_total = meminfo.get("HugePages_Total", 0)
+    huge_size = meminfo.get("Hugepagesize", 0)
+
+    reserved_kb = huge_total * huge_size
+    return reserved_kb
+
 def calculate_unaccounted(meminfo):
     total = meminfo.get("MemTotal", 0)
+
     fields = [
         "MemFree", "Buffers", "Cached", "SwapCached",
         "AnonPages", "Slab", "KernelStack",
-        "PageTables", "Percpu", "Hugetlb"
+        "PageTables", "Percpu"
     ]
     accounted_sum = sum(meminfo.get(field, 0) for field in fields)
+
+    huge_reserved_kb = get_hugepages_reserved_kb(meminfo)
+    accounted_sum += huge_reserved_kb
+    fields.append("HugePagesReserved")
+
     return total, accounted_sum, total - accounted_sum, fields
 
 def print_simple(meminfo, unit):
@@ -80,11 +112,8 @@ def print_simple(meminfo, unit):
     anon_shared_kb = max((active_anon + inactive_anon) - meminfo.get("AnonPages", 0), 0)
     anon_extra_text = f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
 
-    huge_total = meminfo.get("HugePages_Total", 0)
-    huge_free = meminfo.get("HugePages_Free", 0)
-    huge_size = meminfo.get("Hugepagesize", 0)
-    huge_total_kb = huge_total * huge_size
-    huge_used_kb = (huge_total - huge_free) * huge_size
+    huge_total_kb = get_hugepages_reserved_kb(meminfo)
+    huge_used_kb = get_hugepages_used_kb(meminfo)
 
     swap_total = meminfo.get("SwapTotal", 0)
     swap_free = meminfo.get("SwapFree", 0)
@@ -164,7 +193,7 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
     show("PageTables", meminfo.get("PageTables", 0))
     show("Percpu", meminfo.get("Percpu", 0))
     show("HugePages_Total", huge_total_kb)
-    show("HugePagesUsed", hugetlb_used_kb)
+    show("HugePages_Used", hugetlb_used_kb)
 
     swap_total = meminfo.get("SwapTotal", 0)
     swap_free = meminfo.get("SwapFree", 0)
@@ -177,10 +206,22 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
     if verbose:
         print("\nFormula used for calculation:")
         print("  Unaccounted Memory = MemTotal - " + " - ".join(fields))
+
         total_val = scale_value(meminfo.get("MemTotal", 0), unit)
-        values = [scale_value(meminfo.get(f, 0), unit) for f in fields]
+
+        huge_reserved_kb = get_hugepages_reserved_kb(meminfo)
+        # Map each field name to its displayed numeric value
+        values = []
+        for f in fields:
+            if f == "HugePagesReserved":
+                v = scale_value(huge_reserved_kb, unit)
+            else:
+                v = scale_value(meminfo.get(f, 0), unit)
+            values.append(v)
+
         expr = " - ".join(f"{v:.2f}" for v in values)
         result = scale_value(unaccounted, unit)
+
         print(f"  {result:.2f} = {total_val:.2f} - {expr}\n")
 
     show("Unaccounted:", unaccounted, unit_label)
