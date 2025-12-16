@@ -7,6 +7,7 @@ import subprocess
 from datetime import datetime
 from collections import defaultdict, Counter
 import sys
+import shutil
 
 def run_ausearch(audit_log_path, start_time=None, end_time=None, debug=False):
     cmd = ["ausearch", "-if", audit_log_path]
@@ -20,6 +21,75 @@ def run_ausearch(audit_log_path, start_time=None, end_time=None, debug=False):
     if result.returncode != 0:
         raise RuntimeError(f"ausearch failed: {result.stderr.strip()}")
     return result.stdout
+
+from datetime import datetime
+
+def extract_timestamp(line):
+    # Example format: "Dec 11 20:27:19"
+    match = re.match(r'^(\w{3} +\d{1,2} \d{2}:\d{2}:\d{2})', line)
+    if not match:
+        return None
+    try:
+        # Assume current year for sosreport
+        timestamp = datetime.strptime(f"2025 {match.group(1)}", "%Y %b %d %H:%M:%S")
+        return timestamp
+    except ValueError:
+        return None
+
+def check_audit_performance(log_path="var/log/messages", verbose=False):
+    suppressed_total = 0
+    suppressed_lines = []
+    suppressed_times = []
+
+    lost_event_lines = []
+    lost_event_count = 0
+    lost_event_times = []
+
+    if not os.path.isfile(log_path):
+        print(f"[WARN] Log file {log_path} not found. Skipping suppressed message check.")
+        return
+
+    with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            ts = extract_timestamp(line)
+
+            if "Suppressed" in line and "auditd.service" in line:
+                suppressed_lines.append(line.strip())
+                if ts:
+                    suppressed_times.append(ts)
+                match = re.search(r'Suppressed (\d+) messages', line)
+                if match:
+                    suppressed_total += int(match.group(1))
+
+            elif "dispatch err" in line and "event lost" in line:
+                lost_event_lines.append(line.strip())
+                lost_event_count += 1
+                if ts:
+                    lost_event_times.append(ts)
+
+    print("\n=== Audit Performance Diagnostics ===")
+
+    if suppressed_lines:
+        print(f"Total Suppressed Messages (journal): {suppressed_total}")
+        if suppressed_times:
+            print(f"During : {min(suppressed_times)} → {max(suppressed_times)}")
+        print("Recent Suppression Events:")
+        for line in suppressed_lines[-5:]:
+            print(f"  {line}")
+    else:
+        print("No suppression messages found in logs.")
+
+    if lost_event_lines:
+        print(f"\nLost Events Reported by auditd: {lost_event_count}")
+        if lost_event_times:
+            print(f"During : {min(lost_event_times)} → {max(lost_event_times)}")
+        print("Recent Lost Events:")
+        for line in lost_event_lines[-5:]:
+            print(f"  {line}")
+    else:
+        print("\nNo 'event lost' messages found in auditd logs.")
+
+    print("")
 
 def parse_ausearch_output(output):
     blocks = output.split("----\n")
@@ -133,6 +203,8 @@ def main():
     parser.add_argument("--start", help="Start time (e.g. '2024-05-21 00:00:00')")
     parser.add_argument("--end", help="End time (e.g. '2024-05-21 23:59:59')")
     parser.add_argument("--details", help="Show detailed stats for a command or comm name")
+    parser.add_argument("-p", "--check-performance", action="store_true", help="Check for auditd performance issues")
+    parser.add_argument("--log-path", default="var/log/messages", help="Path to messages log file (default: var/log/messages)")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
     parser.add_argument("-d", "--debug", action="store_true", help="Enable debug output")
     args = parser.parse_args()
@@ -161,5 +233,9 @@ def main():
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(2)
 
+    if args.check_performance:
+        check_audit_performance(log_path=args.log_path, verbose=args.verbose)
+
 if __name__ == "__main__":
     main()
+
