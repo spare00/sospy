@@ -57,89 +57,102 @@ def is_section_header(line):
 
 def process_segment(lines, tail_lines=None, debug=False):
     all_blocks = []
+
+    # ---- CPU 전용 ----
+    cpu_header = None
+    cpu_lines = []
+    cpu_average = None
+
+    # ---- 일반 섹션 ----
     section_header = ""
     buffer = deque()
     average_line = ""
-    is_multicore_section = False
-    is_block_section = False
     section_key = None
     current_section = False
+    is_block_section = False
     device_set = set()
 
-    def flush_section():
-        nonlocal buffer, section_header, average_line, section_key
-        nonlocal is_multicore_section, is_block_section, current_section, device_set
+    def flush_normal_section():
+        nonlocal buffer, section_header, average_line
+        nonlocal section_key, current_section, is_block_section, device_set
 
         if not buffer:
             return
 
-        if is_block_section and tail_lines:
-            device_count = len(device_set) or 1
-            shown = list(buffer)[-tail_lines * device_count:]
-        else:
-            shown = list(buffer)[-tail_lines:] if tail_lines else list(buffer)
-
+        shown = list(buffer)[-tail_lines:] if tail_lines else list(buffer)
         block = [section_header] + shown
         if average_line:
             block.append(average_line)
-
         all_blocks.append(block)
+
         buffer.clear()
         average_line = ""
         section_header = ""
         section_key = None
-        is_multicore_section = False
-        is_block_section = False
         current_section = False
+        is_block_section = False
         device_set = set()
 
     for line in lines:
         line = line.rstrip()
 
-        # Detect section header
-        if is_section_header(line):
-            tokens = line.split()
-            key_fields = tuple(tokens[1:])  # skip timestamp
-
+        # ---- CPU header ----
+        if is_section_header(line) and "CPU" in line.split():
             if debug:
-                print(f"[DEBUG] Section header detected: {line}")
+                print(f"[DEBUG] CPU header detected: {line}")
 
-            if section_key is not None and key_fields != section_key:
-                flush_section()
-            elif section_key is not None and key_fields == section_key:
-                if debug:
-                    print(f"[DEBUG] Duplicate header (skipped): {line}")
-                continue
+            if cpu_header is None:
+                cpu_header = line   # 첫 CPU header만 저장
+            continue  # 이후 CPU header는 무시
 
-            flush_section()
+        # ---- CPU Average ----
+        if line.startswith("Average:") and " all" in line:
+            cpu_average = line
+            continue
+
+        # ---- CPU data (all only) ----
+        if re.match(r"^\d{2}:\d{2}:\d{2}", line) and " all " in line:
+            cpu_lines.append(line)
+            continue
+
+        # ---- 일반 섹션 header ----
+        if is_section_header(line):
+            flush_normal_section()
+
             section_header = line
-            section_key = key_fields
-            is_multicore_section = "CPU" in key_fields
-            is_block_section = any(x in key_fields for x in ("DEV", "IFACE"))  # ✅ updated here
+            section_key = tuple(line.split()[1:])
             current_section = True
+            is_block_section = any(x in section_key for x in ("DEV", "IFACE"))
             device_set = set()
             continue
 
-        if current_section:
-            if line.startswith("Average:"):
-                if is_multicore_section:
-                    if " all" in line:
-                        average_line = line
-                else:
-                    average_line = line
-                flush_section()
-            elif re.match(r"^\d{2}:\d{2}:\d{2}", line):
-                if is_multicore_section:
-                    if " all " in line:
-                        buffer.append(line)
-                else:
-                    if is_block_section:
-                        parts = line.split()
-                        if len(parts) > 1:
-                            device_set.add(parts[1])
-                    buffer.append(line)
+        if not current_section:
+            continue
 
-    flush_section()
+        # ---- 일반 섹션 Average ----
+        if line.startswith("Average:"):
+            average_line = line
+            flush_normal_section()
+            continue
+
+        # ---- 일반 섹션 데이터 ----
+        if re.match(r"^\d{2}:\d{2}:\d{2}", line):
+            if is_block_section:
+                parts = line.split()
+                if len(parts) > 1:
+                    device_set.add(parts[1])
+            buffer.append(line)
+
+    flush_normal_section()
+
+    # ---- CPU 출력 (맨 앞) ----
+    if cpu_header and cpu_lines:
+        shown = cpu_lines[-tail_lines:] if tail_lines else cpu_lines
+        cpu_block = [cpu_header] + shown
+        if cpu_average:
+            cpu_block.append(cpu_average)
+        all_blocks.insert(0, cpu_block)
+
     return all_blocks
 
 def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
