@@ -55,6 +55,13 @@ def is_section_header(line):
             return True
     return False
 
+def is_cpu_usage_header(line):
+    tokens = line.split()
+    return (
+        is_section_header(line)
+        and "CPU" in tokens
+    )
+
 def process_segment(lines, tail_lines=None, debug=False):
     all_blocks = []
 
@@ -62,6 +69,7 @@ def process_segment(lines, tail_lines=None, debug=False):
     cpu_header = None
     cpu_lines = []
     cpu_average = None
+    in_cpu_section = False
 
     # ---- 일반 섹션 ----
     section_header = ""
@@ -97,23 +105,43 @@ def process_segment(lines, tail_lines=None, debug=False):
         line = line.rstrip()
 
         # ---- CPU header ----
-        if is_section_header(line) and "CPU" in line.split():
+        if is_cpu_usage_header(line):
+            if in_cpu_section:
+                # CPU 섹션 내부에서 반복 출력된 헤더 → 무시
+                continue
+
             if debug:
-                print(f"[DEBUG] CPU header detected: {line}")
+                print(f"[DEBUG] CPU section header detected: {line}")
 
-            if cpu_header is None:
-                cpu_header = line   # 첫 CPU header만 저장
-            continue  # 이후 CPU header는 무시
+            flush_normal_section()
 
-        # ---- CPU Average ----
-        if line.startswith("Average:") and " all" in line:
-            cpu_average = line
+            section_header = line
+            current_section = True
+            in_cpu_section = True
+            buffer.clear()
+            average_line = ""
             continue
 
         # ---- CPU data (all only) ----
-        if re.match(r"^\d{2}:\d{2}:\d{2}", line) and " all " in line:
-            cpu_lines.append(line)
+        if in_cpu_section and re.match(r"^\d{2}:\d{2}:\d{2}", line):
+            parts = line.split()
+            if len(parts) > 1 and parts[1] == "all":
+                buffer.append(line)
             continue
+
+        # ---- CPU Average ----
+        if in_cpu_section and line.startswith("Average:"):
+            parts = line.split()
+            if len(parts) > 1 and parts[1] == "all":
+                average_line = line
+            flush_normal_section()
+            in_cpu_section = False
+            continue
+
+        # ---- 다른 섹션 header ----
+        if is_section_header(line) and in_cpu_section:
+            in_cpu_section = False
+            # fall through → 일반 섹션 처리
 
         # ---- 일반 섹션 header ----
         if is_section_header(line):
@@ -144,14 +172,6 @@ def process_segment(lines, tail_lines=None, debug=False):
             buffer.append(line)
 
     flush_normal_section()
-
-    # ---- CPU 출력 (맨 앞) ----
-    if cpu_header and cpu_lines:
-        shown = cpu_lines[-tail_lines:] if tail_lines else cpu_lines
-        cpu_block = [cpu_header] + shown
-        if cpu_average:
-            cpu_block.append(cpu_average)
-        all_blocks.insert(0, cpu_block)
 
     return all_blocks
 
