@@ -5,27 +5,35 @@ import re
 import subprocess
 from collections import deque
 
-# Define the unique tokens that mark the start of each sar section
 SECTION_HEADERS = [
-    "%usr",       # CPU section
-    "proc/s",     # Context switches
-    "pswpin/s",   # Swap
-    "pgpgin/s",   # Paging
-    "rtps",       # I/O request to a physical device
-    "kbmemfree",  # Memory
-    "kbswpfree",  # Swap summary
-    "kbhugfree",  # Hugepages
-    "dentunusd",  # File/inode
-    "runq-sz",    # Load average / scheduler
-    "DEV",        # Block device
-    "rxpck/s",    # statistics from the network devices
-    "rxerr/s",    # statistics from the network failures
-    "call/s",     # NFS client activity
-    "scall/s",    # NFS server activity
-    "totsck",     # Statistics on sockets
-    "total/s",    # Software-based network processing
-
+    "%usr",
+    "proc/s",
+    "pswpin/s",
+    "pgpgin/s",
+    "rtps",
+    "kbmemfree",
+    "kbswpfree",
+    "kbhugfree",
+    "dentunusd",
+    "runq-sz",
+    "DEV",
+    "rxpck/s",
+    "rxerr/s",
+    "call/s",
+    "scall/s",
+    "totsck",
+    "total/s",
 ]
+
+TIME_RE = re.compile(r"^\d{2}:\d{2}:\d{2}(?:\s+(?:AM|PM))?\b")
+
+
+def normalize_tokens(line):
+    tokens = line.split()
+    if len(tokens) >= 2 and tokens[1] in ("AM", "PM"):
+        return [tokens[0]] + tokens[2:]
+    return tokens
+
 
 def get_sar_file_from_date():
     try:
@@ -39,51 +47,61 @@ def get_sar_file_from_date():
             shell=True,
             check=True
         )
-        date_suffix = result.stdout.strip()
-        return f"sos_commands/sar/sar{date_suffix}"
+        return f"sos_commands/sar/sar{result.stdout.strip()}"
     except Exception as e:
         print(f"Failed to determine SAR file from date: {e}")
         sys.exit(1)
 
-def is_section_header(line):
-    # Header line: timestamp + known section name (e.g. "CPU" or "proc/s")
-    if not re.match(r"^\d{2}:\d{2}:\d{2}", line):
-        return False
-    for marker in SECTION_HEADERS:
-        tokens = line.split()
-        if marker in tokens:
-            return True
-    return False
 
-def is_cpu_usage_header(line):
-    tokens = line.split()
-    return (
-        is_section_header(line)
-        and "CPU" in tokens
-    )
+def is_section_header(line):
+    if not TIME_RE.match(line):
+        return False
+    tokens = normalize_tokens(line)
+    return any(m in tokens for m in SECTION_HEADERS)
+
+
+def is_cpu_like_header(line):
+    if not TIME_RE.match(line):
+        return False
+    tokens = normalize_tokens(line)
+    return "CPU" in tokens
+
 
 def process_segment(lines, tail_lines=None, debug=False):
     all_blocks = []
 
-    # ---- CPU 전용 ----
-    cpu_header = None
-    cpu_lines = []
-    cpu_average = None
-    in_cpu_section = False
+    # CPU-like section state
+    in_cpu = False
+    cpu_header = ""
+    cpu_data = []
+    cpu_avg_all = ""
 
-    # ---- 일반 섹션 ----
+    # Normal section state
+    in_normal = False
     section_header = ""
     buffer = deque()
     average_line = ""
-    section_key = None
-    current_section = False
-    is_block_section = False
-    device_set = set()
 
-    def flush_normal_section():
-        nonlocal buffer, section_header, average_line
-        nonlocal section_key, current_section, is_block_section, device_set
+    def flush_cpu():
+        nonlocal in_cpu, cpu_header, cpu_data, cpu_avg_all
+        if not cpu_header:
+            return
 
+        shown = cpu_data[-tail_lines:] if tail_lines else cpu_data
+        block = [cpu_header] + shown
+        if cpu_avg_all:
+            block.append(cpu_avg_all)
+
+        if len(block) > 1:
+            all_blocks.append(block)
+
+        in_cpu = False
+        cpu_header = ""
+        cpu_data = []
+        cpu_avg_all = ""
+
+    def flush_normal():
+        nonlocal in_normal, section_header, buffer, average_line
         if not buffer:
             return
 
@@ -91,89 +109,76 @@ def process_segment(lines, tail_lines=None, debug=False):
         block = [section_header] + shown
         if average_line:
             block.append(average_line)
+
         all_blocks.append(block)
 
+        in_normal = False
+        section_header = ""
         buffer.clear()
         average_line = ""
-        section_header = ""
-        section_key = None
-        current_section = False
-        is_block_section = False
-        device_set = set()
 
-    for line in lines:
-        line = line.rstrip()
+    for raw in lines:
+        line = raw.rstrip()
 
-        # ---- CPU header ----
-        if is_cpu_usage_header(line):
-            if in_cpu_section:
-                # CPU 섹션 내부에서 반복 출력된 헤더 → 무시
+        # ---- CPU-like header ----
+        if is_cpu_like_header(line):
+            if in_cpu:
+                flush_cpu()
+            flush_normal()
+
+            cpu_header = line
+            cpu_data = []
+            cpu_avg_all = ""
+            in_cpu = True
+            continue
+
+        # ---- Inside CPU-like section ----
+        if in_cpu:
+            if line.startswith("Average:"):
+                parts = line.split()
+                if len(parts) > 1 and parts[1] == "all":
+                    cpu_avg_all = line
                 continue
 
-            if debug:
-                print(f"[DEBUG] CPU section header detected: {line}")
+            if is_section_header(line):
+                flush_cpu()
+                # fall through
 
-            flush_normal_section()
+            elif TIME_RE.match(line):
+                parts = normalize_tokens(line)
+                if len(parts) > 1 and parts[1] == "all":
+                    cpu_data.append(line)
+                continue
 
+        # ---- Normal section header ----
+        if is_section_header(line):
+            flush_normal()
             section_header = line
-            current_section = True
-            in_cpu_section = True
+            in_normal = True
             buffer.clear()
             average_line = ""
             continue
 
-        # ---- CPU data (all only) ----
-        if in_cpu_section and re.match(r"^\d{2}:\d{2}:\d{2}", line):
-            parts = line.split()
-            if len(parts) > 1 and parts[1] == "all":
-                buffer.append(line)
+        if not in_normal:
             continue
 
-        # ---- CPU Average ----
-        if in_cpu_section and line.startswith("Average:"):
-            parts = line.split()
-            if len(parts) > 1 and parts[1] == "all":
-                average_line = line
-            flush_normal_section()
-            in_cpu_section = False
-            continue
-
-        # ---- 다른 섹션 header ----
-        if is_section_header(line) and in_cpu_section:
-            in_cpu_section = False
-            # fall through → 일반 섹션 처리
-
-        # ---- 일반 섹션 header ----
-        if is_section_header(line):
-            flush_normal_section()
-
-            section_header = line
-            section_key = tuple(line.split()[1:])
-            current_section = True
-            is_block_section = any(x in section_key for x in ("DEV", "IFACE"))
-            device_set = set()
-            continue
-
-        if not current_section:
-            continue
-
-        # ---- 일반 섹션 Average ----
+        # ---- Normal Average ----
         if line.startswith("Average:"):
             average_line = line
-            flush_normal_section()
+            flush_normal()
             continue
 
-        # ---- 일반 섹션 데이터 ----
-        if re.match(r"^\d{2}:\d{2}:\d{2}", line):
-            if is_block_section:
-                parts = line.split()
-                if len(parts) > 1:
-                    device_set.add(parts[1])
+        # ---- Normal data ----
+        if TIME_RE.match(line):
             buffer.append(line)
 
-    flush_normal_section()
+    # EOF flush
+    if in_cpu:
+        flush_cpu()
+    flush_normal()
 
     return all_blocks
+
 
 def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
     with open(filepath, "r") as f:
@@ -182,39 +187,31 @@ def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
     print(f"Reading SAR file: {filepath}\n")
 
     segments = []
-    current_segment = []
+    current = []
 
-    for idx, line in enumerate(raw_lines):
+    for line in raw_lines:
         if "LINUX RESTART" in line:
-            if current_segment:
-                segments.append(current_segment)
-                if debug:
-                    print(f"[DEBUG] Segment added before RESTART at line {idx}")
+            if current:
+                segments.append(current)
             segments.append("RESTART")
-            current_segment = []
+            current = []
         else:
-            current_segment.append(line)
+            current.append(line)
 
-    if current_segment:
-        segments.append(current_segment)
-        if debug:
-            print(f"[DEBUG] Final segment added with {len(current_segment)} lines")
+    if current:
+        segments.append(current)
 
-    segment_count = 0
     for segment in segments:
         if segment == "RESTART":
             print("RESTART\n")
             continue
 
-        segment_count += 1
-        if verbose:
-            print(f"[INFO] Processing segment #{segment_count} with {len(segment)} lines")
-
         blocks = process_segment(segment, tail_lines, debug=debug)
         for block in blocks:
-            for line in block:
-                print(line)
+            for l in block:
+                print(l)
             print()
+
 
 if __name__ == "__main__":
     import argparse
@@ -237,4 +234,3 @@ if __name__ == "__main__":
         sys.exit(1)
 
     parse_sar_sections(sar_file, tail_lines=args.N, debug=args.d, verbose=args.v)
-
