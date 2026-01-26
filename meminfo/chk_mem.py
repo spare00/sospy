@@ -43,11 +43,15 @@ def parse_tmpfs_df(path: str) -> Optional[int]:
     try:
         with open(path) as f:
             used_total = 0
-            _ = f.readline()
+            _ = f.readline()  # Skip header
             for line in f:
                 parts = line.split()
                 if len(parts) >= 6 and "tmpfs" in parts[0] and parts[5] != "/dev":
-                    used_total += int(parts[2])
+                    try:
+                        used_total += int(parts[2])
+                    except ValueError:
+                        # Skip lines with non-integer 'Used' values like '-'
+                        continue
             return used_total
     except FileNotFoundError:
         return None
