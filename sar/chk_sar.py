@@ -16,6 +16,7 @@ SECTION_HEADERS = [
     "kbhugfree",
     "dentunusd",
     "runq-sz",
+    "TTY",
     "DEV",
     "rxpck/s",
     "rxerr/s",
