@@ -80,7 +80,7 @@ def process_segment(lines, tail_lines=None, debug=False):
     in_normal = False
     section_header = ""
     buffer = deque()
-    average_line = ""
+    average_lines = []
 
     def flush_cpu():
         nonlocal in_cpu, cpu_header, cpu_data, cpu_avg_all
@@ -101,29 +101,32 @@ def process_segment(lines, tail_lines=None, debug=False):
         cpu_avg_all = ""
 
     def flush_normal():
-        nonlocal in_normal, section_header, buffer, average_line
-        if not buffer:
+        nonlocal in_normal, section_header, buffer, average_lines
+        if not buffer and not average_lines:
             return
 
         shown = list(buffer)[-tail_lines:] if tail_lines else list(buffer)
         block = [section_header] + shown
-        if average_line:
-            block.append(average_line)
+        if average_lines:
+            block.extend(average_lines)
 
         all_blocks.append(block)
 
         in_normal = False
         section_header = ""
         buffer.clear()
-        average_line = ""
+        average_lines = []
 
     for raw in lines:
         line = raw.rstrip()
 
         # ---- CPU-like header ----
         if is_cpu_like_header(line):
+            # sar repeats the CPU header periodically within the same CPU section.
+            # Do NOT flush/split the section on repeated headers; just ignore them.
             if in_cpu:
-                flush_cpu()
+                continue
+
             flush_normal()
 
             cpu_header = line
@@ -156,16 +159,17 @@ def process_segment(lines, tail_lines=None, debug=False):
             section_header = line
             in_normal = True
             buffer.clear()
-            average_line = ""
+            average_lines = []
             continue
 
         if not in_normal:
             continue
 
         # ---- Normal Average ----
+        # Some sections (e.g., DEV) may have multiple "Average:" lines (one per device).
+        # Collect them all and flush when the section ends (next header / RESTART / EOF).
         if line.startswith("Average:"):
-            average_line = line
-            flush_normal()
+            average_lines.append(line)
             continue
 
         # ---- Normal data ----
@@ -190,7 +194,7 @@ def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
     current = []
 
     for line in raw_lines:
-        if "LINUX RESTART" in line:
+        if "RESTART" in line:
             if current:
                 segments.append(current)
             segments.append("RESTART")
