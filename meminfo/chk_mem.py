@@ -230,6 +230,166 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
 
     show("Unaccounted:", unaccounted, unit_label)
 
+def parse_ps(path: str, top_n: int = 10) -> Optional[list]:
+    """
+    Parse a ps output file and return the top N processes by RSS.
+    Skips continuation/thread lines where PID is '-'.
+    Returns list of raw line strings (header + top N), or None if file not found.
+    """
+    try:
+        with open(path) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        return None
+
+    if not lines:
+        return None
+
+    header = lines[0]
+    header_parts = header.split()
+    try:
+        pid_col = header_parts.index("PID")
+        rss_col = header_parts.index("RSS")
+    except ValueError:
+        return None
+
+    procs = []
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) <= max(pid_col, rss_col):
+            continue
+        if parts[pid_col] == "-":
+            # Continuation/thread line — skip
+            continue
+        try:
+            rss = int(parts[rss_col])
+        except ValueError:
+            continue
+        procs.append((rss, line))
+
+    procs.sort(key=lambda x: x[0], reverse=True)
+    return [header] + [line for _, line in procs[:top_n]]
+
+
+def print_top_procs(ps_path: str, top_n: int = 10):
+    rows = parse_ps(ps_path, top_n)
+    if rows is None:
+        print(f"Warning: ps file not found: {ps_path}")
+        return
+    print(f"\nTop {top_n} processes by RSS:")
+    print("=" * 80)
+    for row in rows:
+        print(row, end="")
+    print()
+
+
+def print_top_cmds(ps_path: str, top_n: int = 10):
+    """
+    Aggregate RSS by the first token of COMMAND, skipping continuation lines
+    where PID is '-'. Prints top N commands by total RSS plus a grand total.
+    """
+    try:
+        with open(ps_path) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print(f"Warning: ps file not found: {ps_path}")
+        return
+
+    if not lines:
+        return
+
+    header_parts = lines[0].split()
+    try:
+        pid_col = header_parts.index("PID")
+        rss_col = header_parts.index("RSS")
+        cmd_col = header_parts.index("COMMAND")
+    except ValueError:
+        print("Warning: could not find PID, RSS, or COMMAND column in ps header")
+        return
+
+    rss_by_cmd = {}
+    cnt_by_cmd = {}
+    total_rss = 0
+
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) <= max(pid_col, rss_col, cmd_col):
+            continue
+        if parts[pid_col] == "-":
+            continue
+        try:
+            rss = int(parts[rss_col])
+        except ValueError:
+            continue
+        cmd = parts[cmd_col]  # first token of COMMAND
+        rss_by_cmd[cmd] = rss_by_cmd.get(cmd, 0) + rss
+        cnt_by_cmd[cmd] = cnt_by_cmd.get(cmd, 0) + 1
+        total_rss += rss
+
+    ranked = sorted(rss_by_cmd.items(), key=lambda x: x[1], reverse=True)
+
+    print(f"\nTop {top_n} commands by aggregated RSS:  Total={total_rss} KiB ({total_rss / 2**20:.2f} GiB)")
+    print(f"{'KiB':>10}  {'GiB':>8}   CNT  COMMAND")
+    print("=" * 80)
+    for cmd, rss in ranked[:top_n]:
+        print(f"{rss:>10d} KiB ({rss / 2**20:>6.2f} GiB) {cnt_by_cmd[cmd]:>4} {cmd}")
+    print()
+
+
+
+def print_top_users(ps_path: str, top_n: int = 10):
+    """
+    Aggregate RSS by USER, skipping continuation lines where PID is '-'.
+    Prints top N users by total RSS plus a grand total.
+    """
+    try:
+        with open(ps_path) as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        print(f"Warning: ps file not found: {ps_path}")
+        return
+
+    if not lines:
+        return
+
+    header_parts = lines[0].split()
+    try:
+        user_col = header_parts.index("USER")
+        pid_col = header_parts.index("PID")
+        rss_col = header_parts.index("RSS")
+    except ValueError:
+        print("Warning: could not find USER, PID, or RSS column in ps header")
+        return
+
+    rss_by_user = {}
+    cnt_by_user = {}
+    total_rss = 0
+
+    for line in lines[1:]:
+        parts = line.split()
+        if len(parts) <= max(user_col, pid_col, rss_col):
+            continue
+        if parts[pid_col] == "-":
+            continue
+        try:
+            rss = int(parts[rss_col])
+        except ValueError:
+            continue
+        user = parts[user_col]
+        rss_by_user[user] = rss_by_user.get(user, 0) + rss
+        cnt_by_user[user] = cnt_by_user.get(user, 0) + 1
+        total_rss += rss
+
+    ranked = sorted(rss_by_user.items(), key=lambda x: x[1], reverse=True)
+
+    print(f"\nTop {top_n} users by aggregated RSS:  Total={total_rss} KiB ({total_rss / 2**20:.2f} GiB)")
+    print(f"{'KiB':>10}  {'GiB':>8}   CNT  USER")
+    print("=" * 80)
+    for user, rss in ranked[:top_n]:
+        print(f"{rss:>10d} KiB ({rss / 2**20:>6.2f} GiB) {cnt_by_user[user]:>4} {user}")
+    print()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-K", action="store_const", const="K", dest="unit", help="Show output in KiB")
@@ -237,23 +397,77 @@ def main():
     parser.add_argument("-G", action="store_const", const="G", dest="unit", help="Show output in GiB")
     parser.add_argument("-v", "--verbose", action="store_true", help="Show formula for unaccounted memory")
     parser.add_argument("path", nargs="?", help="sosreport root or /proc/meminfo file (default: cwd)")
+
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("-i", nargs="?", const=True, metavar="MEMINFO_FILE",
+                      help="Show memory info (default mode). Optionally specify a meminfo file path.")
+    mode.add_argument("-p", nargs="?", const=True, metavar="PS_FILE",
+                      help="Show top 10 processes by RSS. Optionally specify a ps file path; "
+                           "defaults to <sosroot>/ps or ./ps")
+    mode.add_argument("-c", nargs="?", const=True, metavar="PS_FILE",
+                      help="Show top 10 commands by aggregated RSS. Optionally specify a ps file path; "
+                           "defaults to <sosroot>/ps or ./ps")
+    mode.add_argument("-u", nargs="?", const=True, metavar="PS_FILE",
+                      help="Show top 10 users by aggregated RSS. Optionally specify a ps file path; "
+                           "defaults to <sosroot>/ps or ./ps")
+
     args = parser.parse_args()
+
+    # Default to -i mode when none of the mode flags is given
+    if not args.i and not args.p and not args.c and not args.u:
+        args.i = True
 
     path = args.path or "."
     unit = args.unit or "G"
 
-    # Detect meminfo-only mode
-    if os.path.isfile(path) and os.path.basename(path) == "meminfo":
-        meminfo = parse_meminfo(path)
-        print_simple(meminfo, unit)
-        return
+    if args.i:
+        # If -i was given an explicit file, use it directly
+        if isinstance(args.i, str):
+            meminfo = parse_meminfo(args.i)
+            print_simple(meminfo, unit)
+            return
 
-    sosroot = path
-    meminfo = parse_meminfo(os.path.join(sosroot, "proc/meminfo"))
-    tmpfs_used = parse_tmpfs_df(os.path.join(sosroot, "df"))
-    _, sysv_rss, _ = parse_sysvipc_shm(os.path.join(sosroot, "proc/sysvipc/shm"))
-    print_detailed(meminfo, tmpfs_used, sysv_rss, unit, args.verbose)
+        # Detect meminfo-only mode (bare meminfo file passed as positional)
+        if os.path.isfile(path) and os.path.basename(path) == "meminfo":
+            meminfo = parse_meminfo(path)
+            print_simple(meminfo, unit)
+            return
+
+        sosroot = path
+        meminfo = parse_meminfo(os.path.join(sosroot, "proc/meminfo"))
+        tmpfs_used = parse_tmpfs_df(os.path.join(sosroot, "df"))
+        _, sysv_rss, _ = parse_sysvipc_shm(os.path.join(sosroot, "proc/sysvipc/shm"))
+        print_detailed(meminfo, tmpfs_used, sysv_rss, unit, args.verbose)
+
+    elif args.p:
+        if isinstance(args.p, str):
+            ps_path = args.p
+        elif os.path.isfile(path):
+            # positional arg is a file (e.g. sos_commands/process/ps_auxwwwm) — use it directly
+            ps_path = path
+        else:
+            ps_path = os.path.join(path, "ps")
+        print_top_procs(ps_path)
+
+    elif args.c:
+        if isinstance(args.c, str):
+            ps_path = args.c
+        elif os.path.isfile(path):
+            # positional arg is a file (e.g. sos_commands/process/ps_auxwwwm) — use it directly
+            ps_path = path
+        else:
+            ps_path = os.path.join(path, "ps")
+        print_top_cmds(ps_path)
+
+    elif args.u:
+        if isinstance(args.u, str):
+            ps_path = args.u
+        elif os.path.isfile(path):
+            # positional arg is a file (e.g. sos_commands/process/ps_auxwwwm) — use it directly
+            ps_path = path
+        else:
+            ps_path = os.path.join(path, "ps")
+        print_top_users(ps_path)
 
 if __name__ == "__main__":
     main()
-
