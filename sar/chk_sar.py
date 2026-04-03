@@ -10,6 +10,7 @@ SECTION_HEADERS = [
     "proc/s",
     "pswpin/s",
     "pgpgin/s",
+    "frmpg/s",
     "rtps",
     "kbmemfree",
     "kbswpfree",
