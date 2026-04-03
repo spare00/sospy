@@ -71,6 +71,13 @@ def is_cpu_like_header(line):
 def process_segment(lines, tail_lines=None, debug=False):
     all_blocks = []
 
+    def limit_items(items):
+        if tail_lines is None:
+            return items
+        if tail_lines <= 0:
+            return []
+        return items[-tail_lines:]
+
     # CPU-like section state
     in_cpu = False
     cpu_header = ""
@@ -80,7 +87,10 @@ def process_segment(lines, tail_lines=None, debug=False):
     # Normal section state
     in_normal = False
     section_header = ""
-    buffer = deque()
+    section_key = None
+    samples = deque()
+    current_sample_time = None
+    current_sample_rows = []
     average_lines = []
 
     def flush_cpu():
@@ -88,7 +98,7 @@ def process_segment(lines, tail_lines=None, debug=False):
         if not cpu_header:
             return
 
-        shown = cpu_data[-tail_lines:] if tail_lines else cpu_data
+        shown = limit_items(cpu_data)
         block = [cpu_header] + shown
         if cpu_avg_all:
             block.append(cpu_avg_all)
@@ -102,11 +112,17 @@ def process_segment(lines, tail_lines=None, debug=False):
         cpu_avg_all = ""
 
     def flush_normal():
-        nonlocal in_normal, section_header, buffer, average_lines
-        if not buffer and not average_lines:
+        nonlocal in_normal, section_header, section_key, samples
+        nonlocal current_sample_time, current_sample_rows, average_lines
+
+        if current_sample_rows:
+            samples.append(list(current_sample_rows))
+
+        if not samples and not average_lines:
             return
 
-        shown = list(buffer)[-tail_lines:] if tail_lines else list(buffer)
+        shown_samples = limit_items(list(samples))
+        shown = [row for sample in shown_samples for row in sample]
         block = [section_header] + shown
         if average_lines:
             block.extend(average_lines)
@@ -115,7 +131,10 @@ def process_segment(lines, tail_lines=None, debug=False):
 
         in_normal = False
         section_header = ""
-        buffer.clear()
+        section_key = None
+        samples.clear()
+        current_sample_time = None
+        current_sample_rows = []
         average_lines = []
 
     for raw in lines:
@@ -156,10 +175,18 @@ def process_segment(lines, tail_lines=None, debug=False):
 
         # ---- Normal section header ----
         if is_section_header(line):
+            current_key = tuple(normalize_tokens(line)[1:])
+            if in_normal and current_key == section_key:
+                section_header = line
+                continue
+
             flush_normal()
             section_header = line
+            section_key = current_key
             in_normal = True
-            buffer.clear()
+            samples.clear()
+            current_sample_time = None
+            current_sample_rows = []
             average_lines = []
             continue
 
@@ -175,7 +202,13 @@ def process_segment(lines, tail_lines=None, debug=False):
 
         # ---- Normal data ----
         if TIME_RE.match(line):
-            buffer.append(line)
+            sample_time = normalize_tokens(line)[0]
+            if current_sample_time is None or sample_time != current_sample_time:
+                if current_sample_rows:
+                    samples.append(list(current_sample_rows))
+                current_sample_time = sample_time
+                current_sample_rows = []
+            current_sample_rows.append(line)
 
     # EOF flush
     if in_cpu:
@@ -186,8 +219,15 @@ def process_segment(lines, tail_lines=None, debug=False):
 
 
 def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
-    with open(filepath, "r") as f:
-        raw_lines = f.readlines()
+    try:
+        with open(filepath, "r") as f:
+            raw_lines = f.readlines()
+    except FileNotFoundError:
+        print(f"SAR file not found: {filepath}", file=sys.stderr)
+        sys.exit(1)
+    except OSError as exc:
+        print(f"Failed to read SAR file {filepath}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     print(f"Reading SAR file: {filepath}\n")
 
@@ -229,6 +269,9 @@ if __name__ == "__main__":
     parser.add_argument("-v", action="store_true", help="Enable verbose messages")
 
     args = parser.parse_args()
+
+    if args.N is not None and args.N < 0:
+        parser.error("-N must be 0 or greater")
 
     if args.t:
         sar_file = get_sar_file_from_date()
