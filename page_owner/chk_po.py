@@ -154,6 +154,7 @@ def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
     """
     order_stats = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     alloc_idx = 0
+    last_pos = 0
 
     # bigger buffer helps for huge files
     with open(path, 'r', encoding='utf-8', errors='replace', buffering=1024*1024) as f:
@@ -169,6 +170,7 @@ def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
                     if progress:
                         pos = _file_progress_pos(f)
                         if pos is not None:
+                            last_pos = pos
                             progress.update(pos)
                     continue
                 try:
@@ -182,10 +184,10 @@ def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
             if progress:
                 pos = _file_progress_pos(f)
                 if pos is not None:
+                    last_pos = pos
                     progress.update(pos)
     if progress:
-        pos = _file_progress_pos(f)
-        progress.done(pos or 0)
+        progress.done(progress.total if progress.total else last_pos)
     return order_stats
 
 def parse_page_owner(filename, debug=False, strict=False, progress=None,
@@ -233,6 +235,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
     valid_allocation_detected = False
     has_process_metadata = False  # becomes True if any type2 header seen
     alloc_idx_seen = 0            # sampling counter across all allocations
+    last_pos = 0
 
     def _is_module_token(tok: str) -> bool:
         t = tok.strip()
@@ -432,6 +435,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                         if progress:
                             pos = _file_progress_pos(f)
                             if pos is not None:
+                                last_pos = pos
                                 progress.update(pos)
                         in_trace = False
                         continue
@@ -452,6 +456,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                     if progress:
                         pos = _file_progress_pos(f)
                         if pos is not None:
+                            last_pos = pos
                             progress.update(pos)
                     continue
 
@@ -481,6 +486,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                         if progress:
                             pos = _file_progress_pos(f)
                             if pos is not None:
+                                last_pos = pos
                                 progress.update(pos)
                         in_trace = False
                         continue
@@ -503,6 +509,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                 if progress:
                     pos = _file_progress_pos(f)
                     if pos is not None:
+                        last_pos = pos
                         progress.update(pos)
 
             elif line.startswith("PFN"):
@@ -510,6 +517,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                 if progress:
                     pos = _file_progress_pos(f)
                     if pos is not None:
+                        last_pos = pos
                         progress.update(pos)
                 continue
 
@@ -519,6 +527,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                 if progress:
                     pos = _file_progress_pos(f)
                     if pos is not None:
+                        last_pos = pos
                         progress.update(pos)
 
             elif in_trace and not line:
@@ -527,6 +536,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                 if progress:
                     pos = _file_progress_pos(f)
                     if pos is not None:
+                        last_pos = pos
                         progress.update(pos)
 
             elif not line:
@@ -537,14 +547,14 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                 if progress:
                     pos = _file_progress_pos(f)
                     if pos is not None:
+                        last_pos = pos
                         progress.update(pos)
 
         # End-of-file finalize
         finalize_current()
 
     if progress:
-        pos = _file_progress_pos(f)
-        progress.done(pos or 0)
+        progress.done(progress.total if progress.total else last_pos)
 
     return (process_data, module_data, slab_data, calltrace_data, calltrace_index,
             process_module_pages, total_allocs, skipped_allocations,
@@ -646,10 +656,11 @@ def show_processes_for_module(process_module_pages, module_name, unit, top_n=10)
     print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {unit_label}")
     print("=" * 50)
 
-def show_modules_breakdown(process_data, process_module_pages, top_n=10):
+def show_modules_breakdown(process_data, process_module_pages, unit, top_n=10):
     """-p -m: show per-process module vs non-module memory usage."""
+    unit_short = _unit_short(unit)
     proc_rows = []
-    total_mod = total_non = 0.0
+    total_mod_pages = total_non_pages = 0
 
     for proc, st in process_data.items():
         total_pages = st['pages']
@@ -657,13 +668,13 @@ def show_modules_breakdown(process_data, process_module_pages, top_n=10):
         mod_pages = sum(stats['pages'] for (p, _), stats in process_module_pages.items() if p == proc)
         non_pages = total_pages - mod_pages
 
-        mod_g = (mod_pages * 4) / (1024 * 1024)
-        non_g = (non_pages * 4) / (1024 * 1024)
-        tot_g = mod_g + non_g
+        mod_mem, _ = convert_pages(mod_pages, unit)
+        non_mem, _ = convert_pages(non_pages, unit)
+        tot_mem, _ = convert_pages(total_pages, unit)
 
-        proc_rows.append((proc, mod_g, non_g, tot_g))
-        total_mod += mod_g
-        total_non += non_g
+        proc_rows.append((proc, mod_mem, non_mem, tot_mem))
+        total_mod_pages += mod_pages
+        total_non_pages += non_pages
 
     # Sort by total usage, take top_n
     proc_rows.sort(key=lambda x: x[3], reverse=True)
@@ -672,12 +683,15 @@ def show_modules_breakdown(process_data, process_module_pages, top_n=10):
     # Print
     print("Top 10 Processes:")
     print("=" * 50)
-    print(f"{'Application':<20}{'Modules (G)':>18}{'Non Modules (G)':>20}{'Total (G)':>16}")
+    print(f"{'Application':<20}{'Modules (' + unit_short + ')':>18}{'Non Modules (' + unit_short + ')':>20}{'Total (' + unit_short + ')':>16}")
     print("-" * 80)
-    for proc, mod_g, non_g, tot_g in top_rows:
-        print(f"{proc:<20}{mod_g:>18.2f}{non_g:>20.2f}{tot_g:>16.2f}")
+    for proc, mod_mem, non_mem, tot_mem in top_rows:
+        print(f"{proc:<20}{mod_mem:>18.2f}{non_mem:>20.2f}{tot_mem:>16.2f}")
     print("-" * 80)
-    print(f"{'Total':<20}{total_mod:>18.2f}{total_non:>20.2f}{(total_mod+total_non):>16.2f}")
+    total_mod_mem, _ = convert_pages(total_mod_pages, unit)
+    total_non_mem, _ = convert_pages(total_non_pages, unit)
+    total_mem, _ = convert_pages(total_mod_pages + total_non_pages, unit)
+    print(f"{'Total':<20}{total_mod_mem:>18.2f}{total_non_mem:>20.2f}{total_mem:>16.2f}")
 
 def show_skipped(skipped_allocations, verbose=False):
     if not verbose:
@@ -687,34 +701,36 @@ def show_skipped(skipped_allocations, verbose=False):
     for reason, count in skipped_allocations.items():
         print(f" - {reason.replace('_', ' ').capitalize()}: {count}")
 
-def show_totals(order_stats):
+def show_totals(order_stats, unit):
     total_allocs = sum(v['allocs'] for v in order_stats.values())
     total_pages = sum(v['pages'] for v in order_stats.values())
-    total_gb = (total_pages * 4) / (1024 * 1024)
+    total_mem, unit_label = convert_pages(total_pages, unit)
     print("Summary:")
     print("====================")
     print(f"Total Allocations: {total_allocs}")
-    print(f"Total Memory (GB): {total_gb:.2f}")
+    print(f"Total Memory ({unit_label}): {total_mem:.2f}")
 
-def show_totals_verbose(order_stats):
+def show_totals_verbose(order_stats, unit):
+    unit_short = _unit_short(unit)
     print("Summary:")
     print("====================")
-    print(f"{'Order':<13}{'Allocations':>15}{'Memory (G)':>16}")
+    print(f"{'Order':<13}{'Allocations':>15}{'Memory (' + unit_short + ')':>16}")
     print("========================================")
     for order in sorted(order_stats.keys()):
         allocs = order_stats[order]['allocs']
         pages = order_stats[order]['pages']
-        gb = (pages * 4) / (1024 * 1024)
-        print(f"{order:<13}{allocs:>15}{gb:>14.2f} GB")
+        mem, unit_label = convert_pages(pages, unit)
+        print(f"{order:<13}{allocs:>15}{mem:>14.2f} {unit_label}")
     print("====================")
     total_allocs = sum(v['allocs'] for v in order_stats.values())
     total_pages = sum(v['pages'] for v in order_stats.values())
-    total_gb = (total_pages * 4) / (1024 * 1024)
+    total_mem, unit_label = convert_pages(total_pages, unit)
     print(f"Total Allocations: {total_allocs}")
-    print(f"Total Memory (GB): {total_gb:.2f}")
+    print(f"Total Memory ({unit_label}): {total_mem:.2f}")
 
 def show_slab_by_process(proc_slab_stats, unit, top_n=10):
     """-s (Type-2 only): slab-only usage per process, top N by slab memory."""
+    unit_short = _unit_short(unit)
     rows = [(proc, stats) for proc, stats in proc_slab_stats.items() if stats['slab_pages'] > 0]
     rows.sort(key=lambda x: x[1]['slab_pages'], reverse=True)
 
@@ -725,31 +741,33 @@ def show_slab_by_process(proc_slab_stats, unit, top_n=10):
     # Header
     print("Top 10 Processes:")
     print("=" * 50)
-    print(f"{'Application':<20}{'Allocations':>15}{'Memory (G)':>15}")
+    print(f"{'Application':<20}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
     print("-" * 50)
 
     # Top N only
     for proc, st in rows[:top_n]:
-        mem_gb = (st['slab_pages'] * 4) / (1024 * 1024)
-        print(f"{proc:<20}{st['slab_allocs']:>15}{mem_gb:>15.2f} GB")
+        mem, unit_label = convert_pages(st['slab_pages'], unit)
+        print(f"{proc:<20}{st['slab_allocs']:>15}{mem:>15.2f} {unit_label}")
 
     # Footer total
-    total_mem_gb = (total_pages * 4) / (1024 * 1024)
+    total_mem, unit_label = convert_pages(total_pages, unit)
     print("-" * 50)
-    print(f"{'Total':<20}{total_allocs:>15}{total_mem_gb:>15.2f} GB")
+    print(f"{'Total':<20}{total_allocs:>15}{total_mem:>15.2f} {unit_label}")
 
-def show_slab_breakdown(proc_slab_stats, top_n=10):
+def show_slab_breakdown(proc_slab_stats, unit, top_n=10):
     """-s -p (Type-2 only): slab vs non-slab per process, top N by total."""
+    unit_short = _unit_short(unit)
     # Build rows
     rows = []
-    total_slab = total_non = 0.0
+    total_slab_pages = total_non_pages = 0
     for proc, st in proc_slab_stats.items():
-        slab_g = (st['slab_pages'] * 4) / (1024 * 1024)
-        non_g  = (st['non_slab_pages'] * 4) / (1024 * 1024)
-        tot_g  = slab_g + non_g
-        rows.append((proc, slab_g, non_g, tot_g))
-        total_slab += slab_g
-        total_non  += non_g
+        total_pages = st['slab_pages'] + st['non_slab_pages']
+        slab_mem, _ = convert_pages(st['slab_pages'], unit)
+        non_mem, _ = convert_pages(st['non_slab_pages'], unit)
+        total_mem, _ = convert_pages(total_pages, unit)
+        rows.append((proc, slab_mem, non_mem, total_mem))
+        total_slab_pages += st['slab_pages']
+        total_non_pages += st['non_slab_pages']
 
     # Sort by total desc and take top_n
     rows.sort(key=lambda x: x[3], reverse=True)
@@ -758,12 +776,15 @@ def show_slab_breakdown(proc_slab_stats, top_n=10):
     # Print header exactly as expected
     print("Top 10 Processes:")
     print("=" * 50)
-    print(f"{'Application':<20}{'Slabs (G)':>18}{'Non Slabs (G)':>20}{'Total (G)':>16}")
+    print(f"{'Application':<20}{'Slabs (' + unit_short + ')':>18}{'Non Slabs (' + unit_short + ')':>20}{'Total (' + unit_short + ')':>16}")
     print("-" * 80)
-    for proc, slab_g, non_g, tot_g in top_rows:
-        print(f"{proc:<20}{slab_g:>18.2f}{non_g:>20.2f}{tot_g:>16.2f}")
+    for proc, slab_mem, non_mem, total_mem in top_rows:
+        print(f"{proc:<20}{slab_mem:>18.2f}{non_mem:>20.2f}{total_mem:>16.2f}")
     print("-" * 80)
-    print(f"{'Total':<20}{total_slab:>18.2f}{total_non:>20.2f}{(total_slab+total_non):>16.2f}")
+    total_slab_mem, _ = convert_pages(total_slab_pages, unit)
+    total_non_mem, _ = convert_pages(total_non_pages, unit)
+    total_mem, _ = convert_pages(total_slab_pages + total_non_pages, unit)
+    print(f"{'Total':<20}{total_slab_mem:>18.2f}{total_non_mem:>20.2f}{total_mem:>16.2f}")
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze large page_owner file.")
@@ -863,9 +884,9 @@ def main():
             sample_offset=args.sample_offset,
         )
         if args.verbose:
-            show_totals_verbose(order_stats)
+            show_totals_verbose(order_stats, unit)
         else:
-            show_totals(order_stats)
+            show_totals(order_stats, unit)
         return
 
     if args.verbose:
@@ -905,12 +926,12 @@ def main():
             if not has_process_metadata:
                 print("Slab view (-s): Requires Type-2 dump with process metadata.")
             else:
-                show_slab_breakdown(proc_slab_stats, top_n=10)
+                show_slab_breakdown(proc_slab_stats, unit, top_n=10)
         elif args.modules:
             # -p -m: modules vs non-modules per process
             if not has_process_metadata:
                 print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-            show_modules_breakdown(process_data, process_module_pages, top_n=10)
+            show_modules_breakdown(process_data, process_module_pages, unit, top_n=10)
         else:
             # plain -p
             if args.filter_module:
@@ -937,4 +958,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
