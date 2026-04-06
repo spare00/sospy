@@ -27,6 +27,10 @@ SECTION_HEADERS = [
     "total/s",
 ]
 
+MEMORY_SECTION_HEADERS = {
+    "kbmemfree",
+}
+
 TIME_RE = re.compile(r"^\d{2}:\d{2}:\d{2}(?:\s+(?:AM|PM))?\b")
 
 
@@ -69,7 +73,74 @@ def is_cpu_like_header(line):
     return "CPU" in tokens
 
 
-def process_segment(lines, tail_lines=None, debug=False):
+def is_memory_header(line):
+    if not is_section_header(line):
+        return False
+    tokens = normalize_tokens(line)
+    return any(token in MEMORY_SECTION_HEADERS for token in tokens)
+
+
+def add_memory_verbose_columns(block):
+    if not block:
+        return block
+
+    header_tokens = normalize_tokens(block[0])
+    try:
+        free_index = header_tokens.index("kbmemfree")
+        used_index = header_tokens.index("kbmemused")
+        pct_index = header_tokens.index("%memused")
+    except ValueError:
+        return block
+
+    reclaimable_indexes = {}
+    for token in ("kbbuffers", "kbcached", "kbslab"):
+        if token not in header_tokens:
+            return block
+        reclaimable_indexes[token] = header_tokens.index(token)
+
+    formatted_block = [f"{block[0]} {'kbusedall':>12} {'%usedall':>10}"]
+
+    for line in block[1:]:
+        tokens = normalize_tokens(line)
+        try:
+            free_kb = float(tokens[free_index])
+            used_kb = float(tokens[used_index])
+            pct_memused = float(tokens[pct_index])
+        except (IndexError, ValueError):
+            formatted_block.append(line)
+            continue
+
+        reclaimable_kb = 0.0
+        for index in reclaimable_indexes.values():
+            try:
+                reclaimable_kb += float(tokens[index])
+            except (IndexError, ValueError):
+                reclaimable_kb = None
+                break
+
+        if reclaimable_kb is None:
+            formatted_block.append(line)
+            continue
+
+        total_old_kb = free_kb + used_kb
+        total_new_kb = total_old_kb + reclaimable_kb
+
+        pct_old = (used_kb / total_old_kb * 100.0) if total_old_kb else 0.0
+        pct_new = (used_kb / total_new_kb * 100.0) if total_new_kb else 0.0
+
+        if abs(pct_memused - pct_new) <= abs(pct_memused - pct_old):
+            used_all_kb = used_kb + reclaimable_kb
+            used_all_pct = (used_all_kb / total_new_kb * 100.0) if total_new_kb else 0.0
+        else:
+            used_all_kb = used_kb
+            used_all_pct = pct_old
+
+        formatted_block.append(f"{line} {used_all_kb:12.0f} {used_all_pct:10.2f}")
+
+    return formatted_block
+
+
+def process_segment(lines, tail_lines=None, debug=False, memory_only=False):
     all_blocks = []
 
     def limit_items(items):
@@ -104,7 +175,7 @@ def process_segment(lines, tail_lines=None, debug=False):
         if cpu_avg_all:
             block.append(cpu_avg_all)
 
-        if len(block) > 1:
+        if (not memory_only or is_memory_header(cpu_header)) and len(block) > 1:
             all_blocks.append(block)
 
         in_cpu = False
@@ -128,7 +199,8 @@ def process_segment(lines, tail_lines=None, debug=False):
         if average_lines:
             block.extend(average_lines)
 
-        all_blocks.append(block)
+        if not memory_only or is_memory_header(section_header):
+            all_blocks.append(block)
 
         in_normal = False
         section_header = ""
@@ -219,7 +291,7 @@ def process_segment(lines, tail_lines=None, debug=False):
     return all_blocks
 
 
-def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
+def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False, memory_only=False):
     try:
         with open(filepath, "r") as f:
             raw_lines = f.readlines()
@@ -252,8 +324,10 @@ def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False):
             print("RESTART\n")
             continue
 
-        blocks = process_segment(segment, tail_lines, debug=debug)
+        blocks = process_segment(segment, tail_lines, debug=debug, memory_only=memory_only)
         for block in blocks:
+            if verbose and memory_only and block and is_memory_header(block[0]):
+                block = add_memory_verbose_columns(block)
             for l in block:
                 print(l)
             print()
@@ -268,6 +342,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", action="store_true", help="Use SAR file from sosreport date")
     parser.add_argument("-d", action="store_true", help="Enable debug output")
     parser.add_argument("-v", action="store_true", help="Enable verbose messages")
+    parser.add_argument("-m", action="store_true", help="Show memory section only")
 
     args = parser.parse_args()
 
@@ -282,4 +357,10 @@ if __name__ == "__main__":
         print("Usage: chk_sar.py <sar_file> [-N num] [-t]")
         sys.exit(1)
 
-    parse_sar_sections(sar_file, tail_lines=args.N, debug=args.d, verbose=args.v)
+    parse_sar_sections(
+        sar_file,
+        tail_lines=args.N,
+        debug=args.d,
+        verbose=args.v,
+        memory_only=args.m,
+    )
