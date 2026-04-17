@@ -276,7 +276,25 @@ def print_top_procs(ps_path: str, top_n: int = 10):
     if rows is None:
         print(f"Warning: ps file not found: {ps_path}")
         return
-    print(f"\nTop {top_n} processes by RSS:")
+
+    header_parts = rows[0].split()
+    try:
+        rss_col = header_parts.index("RSS")
+    except ValueError:
+        print("Warning: could not find RSS column in ps header")
+        return
+
+    total_rss = 0
+    for row in rows[1:]:
+        parts = row.split()
+        if len(parts) <= rss_col:
+            continue
+        try:
+            total_rss += int(parts[rss_col])
+        except ValueError:
+            continue
+
+    print(f"\nTop {top_n} processes by RSS:  Total={total_rss} KiB ({total_rss / 2**20:.2f} GiB)")
     print("=" * 80)
     for row in rows:
         print(row, end="")
