@@ -8,6 +8,7 @@ from collections import deque
 SECTION_HEADERS = [
     "%usr",
     "proc/s",
+    "INTR",
     "pswpin/s",
     "pgpgin/s",
     "frmpg/s",
