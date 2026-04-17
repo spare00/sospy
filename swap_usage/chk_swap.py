@@ -77,7 +77,7 @@ def collect_cgroup_swap_usage(sosroot: str) -> List[Tuple[str, int]]:
     return usage
 
 def print_cgroup_swap_usage(sosroot: str, limit: int = 10) -> None:
-    print("\nFrom cgroup v2 memory.swap.current:")
+    print(f"\nFrom cgroup v2 memory.swap.current (top {limit} by swap usage):")
 
     if not is_cgroup_v2(sosroot):
         print("  cgroup v2 not detected; per-cgroup swap usage is unavailable.")
@@ -94,7 +94,7 @@ def print_cgroup_swap_usage(sosroot: str, limit: int = 10) -> None:
     for path, value in top_usage:
         print(f"  {path}:{value}")
 
-    print(f"\n  Sum of all memory.swap.current: {total:,} bytes ({total / 1024 / 1024 / 1024:4.2f} GB)")
+    print(f"\n  Sum of all cgroup memory.swap.current entries: {total:,} bytes ({total / 1024 / 1024 / 1024:4.2f} GB)")
 
 def main(sosroot: Optional[str] = None, verbose: bool = False, show_cgroup: bool = False) -> None:
     if sosroot is None:
