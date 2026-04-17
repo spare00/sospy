@@ -76,6 +76,29 @@ def collect_cgroup_swap_usage(sosroot: str) -> List[Tuple[str, int]]:
     usage.sort(key=lambda item: item[1], reverse=True)
     return usage
 
+def get_cgroup_swap_total(usage: List[Tuple[str, int]]) -> Tuple[Optional[int], str]:
+    root_path = "sys/fs/cgroup/memory.swap.current"
+    for path, value in usage:
+        if path == root_path:
+            return value, "root"
+
+    # Fallback for incomplete captures: sum only leaf cgroups to avoid
+    # double-counting parent/child hierarchy totals.
+    cgroup_dirs = {
+        path[: -len("/memory.swap.current")]
+        for path, _ in usage
+    }
+    leaf_total = 0
+    for path, value in usage:
+        cgroup_dir = path[: -len("/memory.swap.current")]
+        has_child = any(
+            other != cgroup_dir and other.startswith(cgroup_dir + "/")
+            for other in cgroup_dirs
+        )
+        if not has_child:
+            leaf_total += value
+    return leaf_total, "leaf"
+
 def print_cgroup_swap_usage(sosroot: str, limit: int = 10) -> None:
     print(f"\nFrom cgroup v2 memory.swap.current (top {limit} by swap usage):")
 
@@ -88,13 +111,16 @@ def print_cgroup_swap_usage(sosroot: str, limit: int = 10) -> None:
         print("  No memory.swap.current files found under sys/fs/cgroup.")
         return
 
-    total = sum(value for _, value in usage)
     top_usage = usage[:limit]
 
     for path, value in top_usage:
         print(f"  {path}:{value}")
 
-    print(f"\n  Sum of all cgroup memory.swap.current entries: {total:,} bytes ({total / 1024 / 1024 / 1024:4.2f} GB)")
+    total, total_source = get_cgroup_swap_total(usage)
+    if total_source == "root":
+        print(f"\n  Hierarchy-aware total from root cgroup memory.swap.current: {total:,} bytes ({total / 1024 / 1024 / 1024:4.2f} GB)")
+    else:
+        print(f"\n  Hierarchy-aware total from leaf cgroup memory.swap.current entries: {total:,} bytes ({total / 1024 / 1024 / 1024:4.2f} GB)")
 
 def main(sosroot: Optional[str] = None, verbose: bool = False, show_cgroup: bool = False) -> None:
     if sosroot is None:
