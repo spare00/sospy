@@ -2,7 +2,7 @@
 import os
 import sys
 import argparse
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 def kb_gb(kb: int) -> str:
     return f"{kb/1024/1024:4.2f} GB"
@@ -52,7 +52,51 @@ def parse_df(path: str) -> Optional[int]:
     except FileNotFoundError:
         return None
 
-def main(sosroot: Optional[str] = None, verbose: bool = False) -> None:
+def is_cgroup_v2(sosroot: str) -> bool:
+    return os.path.exists(os.path.join(sosroot, "sys/fs/cgroup/cgroup.controllers"))
+
+def collect_cgroup_swap_usage(sosroot: str) -> List[Tuple[str, int]]:
+    cgroup_root = os.path.join(sosroot, "sys/fs/cgroup")
+    usage = []
+
+    for root, _, files in os.walk(cgroup_root):
+        if "memory.swap.current" not in files:
+            continue
+
+        path = os.path.join(root, "memory.swap.current")
+        try:
+            with open(path) as f:
+                value = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            continue
+
+        relpath = os.path.relpath(path, sosroot)
+        usage.append((relpath, value))
+
+    usage.sort(key=lambda item: item[1], reverse=True)
+    return usage
+
+def print_cgroup_swap_usage(sosroot: str, limit: int = 10) -> None:
+    print("\nFrom cgroup v2 memory.swap.current:")
+
+    if not is_cgroup_v2(sosroot):
+        print("  cgroup v2 not detected; per-cgroup swap usage is unavailable.")
+        return
+
+    usage = collect_cgroup_swap_usage(sosroot)
+    if not usage:
+        print("  No memory.swap.current files found under sys/fs/cgroup.")
+        return
+
+    total = sum(value for _, value in usage)
+    top_usage = usage[:limit]
+
+    for path, value in top_usage:
+        print(f"  {path}:{value}")
+
+    print(f"\n  Sum of all memory.swap.current: {total:,} bytes ({total / 1024 / 1024 / 1024:4.2f} GB)")
+
+def main(sosroot: Optional[str] = None, verbose: bool = False, show_cgroup: bool = False) -> None:
     if sosroot is None:
         sosroot = "."
 
@@ -164,10 +208,14 @@ def main(sosroot: Optional[str] = None, verbose: bool = False) -> None:
           f"anon swapped ({kb_gb(anon_swapped)}) + "
           f"shared swapped (SysV: {kb_gb(s_sysv)}, tmpfs: {kb_gb(shared_swapped_tmpfs)})")
 
+    if show_cgroup:
+        print_cgroup_swap_usage(sosroot)
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("sosroot", nargs="?", help="sosreport root (default: cwd)")
     ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--cgroup", action="store_true",
+                    help="show top 10 cgroup v2 memory.swap.current entries and their total")
     args = ap.parse_args()
-    main(args.sosroot, verbose=args.verbose)
-
+    main(args.sosroot, verbose=args.verbose, show_cgroup=args.cgroup)
