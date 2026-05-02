@@ -69,3 +69,6 @@ venv.bak/
 # Windows
 Thumbs.db
 ehthumbs.db
+
+# Local sample / fixture dumps (not tracked)
+sample*.txt
