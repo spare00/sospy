@@ -63,7 +63,10 @@ def parse_oom_log(file_path):
 
 # === RSS + Swap Usage Parser ===
 
-def extract_rss_and_swap_usage(oom_events):
+def extract_rss_and_swap_usage(oom_events, group_by="process"):
+    """
+    group_by: 'process' keys by (pid, comm); 'command' aggregates by comm name only.
+    """
     usage_info = defaultdict(lambda: defaultdict(lambda: {'rss': 0, 'swap': 0, 'count': 0}))
     usage_pattern = re.compile(
         r'\[\s*(\d+)]\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(-?\d+)\s+([^\s]+)'
@@ -72,40 +75,73 @@ def extract_rss_and_swap_usage(oom_events):
     for event, lines in oom_events.items():
         for line in lines:
             if match := usage_pattern.search(line):
-                name = match.group(9)
-                usage_info[event][name]['rss'] += int(match.group(5))
-                usage_info[event][name]['swap'] += int(match.group(7))
-                usage_info[event][name]['count'] += 1
+                pid = int(match.group(1))
+                comm = match.group(9)
+                if group_by == "command":
+                    key = comm
+                else:
+                    key = (pid, comm)
+                    entry = usage_info[event][key]
+                    entry['uid'] = int(match.group(2))
+                    entry['tgid'] = int(match.group(3))
+                usage_info[event][key]['rss'] += int(match.group(5))
+                usage_info[event][key]['swap'] += int(match.group(7))
+                usage_info[event][key]['count'] += 1
 
     return usage_info
 
-def display_usage(event_usage, include_swap=False, unit="G", pagesize_kb=4):
+def display_usage(event_usage, group_by="process", include_swap=False, unit="G", pagesize_kb=4):
     unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'GB')
 
     for event, usage in event_usage.items():
         sorted_usage = sorted(usage.items(), key=lambda x: x[1]['rss'], reverse=True)
         total_rss = scale_value(sum(data['rss'] for data in usage.values()), 'P', unit, pagesize_kb)
         print(f"\nEvent: {event}")
-        if include_swap:
+        if group_by == "process":
+            if include_swap:
+                total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_kb)
+                print(
+                    f"{'RSS (' + unit_label + ')':>12} {'Swap (' + unit_label + ')':>12} "
+                    f"{'UID':>7} {'TGID':>7} {'PID':>8} {'Comm':<20}"
+                )
+            else:
+                print(
+                    f"{'RSS (' + unit_label + ')':>10} {'UID':>7} {'TGID':>7} "
+                    f"{'PID':>8} {'Comm':<20}"
+                )
+        elif include_swap:
             total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_kb)
-            print(f"{'RSS (' + unit_label + ')':>12} {'Swap (' + unit_label + ')':>12} {'Count':>8} {'Name':<20}")
+            print(f"{'RSS (' + unit_label + ')':>12} {'Swap (' + unit_label + ')':>12} {'Processes':>10} {'Comm':<20}")
         else:
-            print(f"{'RSS (' + unit_label + ')':>10} {'Count':>10} {'Name':<20}")
+            print(f"{'RSS (' + unit_label + ')':>10} {'Processes':>10} {'Comm':<20}")
 
-        for name, data in sorted_usage[:10]:
+        for key, data in sorted_usage[:10]:
             rss = scale_value(data['rss'], 'P', unit, pagesize_kb)
             count = data['count']
-            if include_swap:
+            if group_by == "process":
+                pid, comm = key
+                uid = data['uid']
+                tgid = data['tgid']
+                if include_swap:
+                    swap = scale_value(data['swap'], 'P', unit, pagesize_kb)
+                    print(
+                        f"{rss:>10.2f} {swap:>12.2f} {uid:>7} {tgid:>7} "
+                        f"{pid:>8} {comm:<20}"
+                    )
+                else:
+                    print(f"{rss:>10.2f} {uid:>7} {tgid:>7} {pid:>8} {comm:<20}")
+            elif include_swap:
                 swap = scale_value(data['swap'], 'P', unit, pagesize_kb)
-                print(f"{rss:>10.2f} {swap:>12.2f} {count:>10} {name:<20}")
+                print(f"{rss:>10.2f} {swap:>12.2f} {count:>10} {key:<20}")
             else:
-                print(f"{rss:>10.2f} {count:>10} {name:<20}")
+                print(f"{rss:>10.2f} {count:>10} {key:<20}")
 
-        print('-' * 50)
+        sep = '-' * (68 if group_by == "process" else 60)
+        print(sep)
         if include_swap:
-            print(f"{total_rss:>10.2f} {total_swap:>12.2f} {'RSS Total':>20}")
+            print(f"{total_rss:>10.2f} {total_swap:>12.2f} {'RSS Total':>25}")
         else:
-            print(f"{total_rss:>10.2f} {'RSS Total':>20}")
+            print(f"{total_rss:>10.2f} {'RSS Total':>25}")
 
 
 # === Memory Summary Placeholder ===
@@ -122,7 +158,8 @@ def main():
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument('-i', '--meminfo', action='store_true', help='Show memory usage summary (Mem-Info)')
-    group.add_argument('-p', '--processes', action='store_true', help='Show top memory-consuming processes (from OOM dump)')
+    group.add_argument('-c', '--commands', action='store_true', help='Aggregate RSS/swap by command name (comm)')
+    group.add_argument('-p', '--processes', action='store_true', help='List RSS/swap per process (PID + comm from OOM dump)')
 
     unit_group = parser.add_mutually_exclusive_group()
     unit_group.add_argument('-K', action='store_const', const='K', dest='unit', help='Display memory in KiB')
@@ -132,19 +169,26 @@ def main():
     parser.set_defaults(unit='G')
 
     parser.add_argument('--pagesize', type=int, default=4, help='Page size in KB (default: 4)')
-    parser.add_argument('-s', '--swap', action='store_true', help='Include swap usage (for --processes)')
+    parser.add_argument('-s', '--swap', action='store_true', help='Include swap usage (for -c / -p)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('log_file', type=str, help='Path to OOM log file')
     args = parser.parse_args()
 
-    # Default to --processes mode if neither is explicitly set
-    if not args.meminfo and not args.processes:
+    # Default to per-process (-p) if no dump mode or meminfo is set
+    if not args.meminfo and not args.commands and not args.processes:
         args.processes = True
 
-    if args.processes:
+    if args.commands or args.processes:
         events = parse_oom_log(args.log_file)
-        usage = extract_rss_and_swap_usage(events)
-        display_usage(usage, include_swap=args.swap, unit=args.unit, pagesize_kb=args.pagesize)
+        group_by = "command" if args.commands else "process"
+        usage = extract_rss_and_swap_usage(events, group_by=group_by)
+        display_usage(
+            usage,
+            group_by=group_by,
+            include_swap=args.swap,
+            unit=args.unit,
+            pagesize_kb=args.pagesize,
+        )
 
     elif args.meminfo:
         try:
