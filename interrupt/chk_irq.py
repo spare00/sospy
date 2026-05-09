@@ -6,13 +6,14 @@ Like xsos -f INTERRUPTS: after each IRQ's smp_affinity_list, one character per
 CPU — '.' if that CPU's interrupt count is 0, '▊' if non-zero (same idea as xsos).
 
 Usage:
-    ./chk_irq.py [--path SOSROOT] [-c] [-n] [-v] [--width N]
+    ./chk_irq.py [--path SOSROOT] [-c] [-H] [-n] [-v] [--width N]
 
     --path    Path to sosreport root or live / (default: current directory)
     -c        Show smp_affinity_list (default: off; bar + description only)
-    -n        Show NUMA node from sys/class/net/<iface>/device/numa_node
+    -H        Show affinity_hint (hex bitmask →CPU list like smp_affinity_list when needed)
+    -n        Show IRQ NUMA node from proc/irq/<n>/node
     -v        Print legend (CPU count, column sources, ▊/. meaning)
-    --width   Max characters when truncating long smp_affinity_list text (default: 256)
+    --width   Max characters when truncating affinity / hint text (default: 256)
 
 NUMA locality highlight (TTY, unless --no-color): smp_affinity_list vs CPUs on
 proc/irq/<n>/node; topology from numactl --hardware or sysfs node cpulist.
@@ -88,6 +89,85 @@ def read_smp_affinity_list(root: str, irq_key: str) -> str | None:
             return f.read().strip()
     except OSError:
         return None
+
+
+def read_affinity_hint(root: str, irq_key: str) -> str | None:
+    if not irq_key.isdigit():
+        return None
+    p = os.path.join(root, "proc", "irq", irq_key, "affinity_hint")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+_HEX_TOKEN_RE = re.compile(r"^[0-9a-fA-F]+$")
+
+
+def cpus_sorted_to_smp_list_style(cpus: list[int]) -> str:
+    """Comma-separated ranges/singles like smp_affinity_list (e.g. 0-3,7,9-11)."""
+    cpus = sorted(set(cpus))
+    if not cpus:
+        return "-"
+    parts: list[str] = []
+    lo = hi = cpus[0]
+    for c in cpus[1:]:
+        if c == hi + 1:
+            hi = c
+        else:
+            parts.append(str(lo) if lo == hi else f"{lo}-{hi}")
+            lo = hi = c
+    parts.append(str(lo) if lo == hi else f"{lo}-{hi}")
+    return ",".join(parts)
+
+
+def hex_irq_mask_words_to_cpulist(hex_words: list[str]) -> str:
+    """
+    Kernel affinity_hint / smp_affinity: comma-separated hex u32 (or mixed-width) words.
+
+    In /proc, groups are usually printed with the **lowest** CPU block **last** in the
+    string (e.g. …,00000001 for CPU 0). Bit i inside a word is CPU offset i within that
+    block; 00000001 → bit 0 → first CPU in that block; 04000000 → bit 26 → CPU 26 in
+    that block. Reverse words so index 0 maps to CPUs 0–bits_per_word-1.
+    """
+    max_hex_len = max(len(w) for w in hex_words)
+    bits_per_word = max_hex_len * 4
+    norm = [w.zfill(max_hex_len) for w in hex_words]
+    norm.reverse()
+    cpus: list[int] = []
+    for wi, ww in enumerate(norm):
+        v = int(ww, 16)
+        for b in range(bits_per_word):
+            if v & (1 << b):
+                cpus.append(wi * bits_per_word + b)
+    return cpus_sorted_to_smp_list_style(cpus)
+
+
+def format_affinity_hint_for_display(raw: str) -> str:
+    """
+    Comma-separated hex (IRQ affinity bitmask) → smp_affinity_list-style digits.
+    Leaves cpulist-style text (digits, '-', ',') unchanged when not a hex mask.
+    """
+    s = raw.strip()
+    if not s or s == "-":
+        return "-"
+    if "," in s:
+        words = [t.strip() for t in s.split(",") if t.strip()]
+        if words and all(_HEX_TOKEN_RE.match(t) for t in words):
+            return hex_irq_mask_words_to_cpulist(words)
+        return raw
+    # Single long hex string (no commas): LSB = CPU 0
+    if _HEX_TOKEN_RE.match(s) and len(s) >= 4:
+        try:
+            val = int(s, 16)
+        except ValueError:
+            return raw
+        cpus = [i for i in range(val.bit_length()) if (val >> i) & 1]
+        return cpus_sorted_to_smp_list_style(cpus)
+    return raw
 
 
 def read_irq_numa_node(root: str, irq_key: str) -> int | None:
@@ -255,53 +335,38 @@ def truncate_affinity(s: str, max_len: int) -> str:
     return s[: max_len - 1] + "…"
 
 
-def netdev_name_candidates(desc: str) -> list[str]:
-    """
-    sysfs uses sys/class/net/<iface>/device/numa_node per netdev.
-
-    IRQ lines often end with a queue label, not a netdev name:
-      enp59s0f0-2           → try iface enp59s0f0
-      eno1-TxRx-0           → ICE/i40e queue; try iface eno1
-    Order: longest-specific strip first so eno1-TxRx-0 does not become eno1-TxRx.
-    """
-    tokens = desc.split()
-    if not tokens:
-        return []
-    name = tokens[-1]
-    out: list[str] = []
-
-    def add(s: str) -> None:
-        if s and s not in out:
-            out.append(s)
-
-    add(name)
-    # Intel ICE / i40e multi-queue: … eno1-TxRx-7
-    for pat in (
-        r"^(.+)-[Tt]x[Rr]x-\d+$",
-        r"^(.+)-[Rr]x-\d+$",
-        r"^(.+)-[Tt]x-\d+$",
-    ):
-        m = re.match(pat, name)
-        if m:
-            add(m.group(1))
-    # virtio / bnxt / common queue index: … enp59s0f0-2 (numeric suffix only)
-    m = re.match(r"^(.+)-(\d+)$", name)
-    if m:
-        add(m.group(1))
-    return out
+def pad_header_cell(label: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if len(label) <= width:
+        return label.ljust(width)
+    if width <= 1:
+        return label[0]
+    return label[: width - 1] + "…"
 
 
-def read_numa_node(root: str, desc: str) -> str | None:
-    for cand in netdev_name_candidates(desc):
-        p = os.path.join(root, "sys", "class", "net", cand, "device", "numa_node")
-        if not os.path.isfile(p):
-            continue
-        try:
-            with open(p, encoding="utf-8", errors="replace") as f:
-                return f.read().strip()
-        except OSError:
-            continue
-    return None
+def format_column_headers(
+    irq_width: int,
+    show_hint: bool,
+    hint_col_width: int,
+    show_affinity: bool,
+    affinity_col_width: int,
+    show_numa: bool,
+    numa_col_width: int,
+    n_cpus: int,
+) -> str:
+    """One header row aligned with format_irq_line / join(\" \")."""
+    parts: list[str] = [f"{'IRQ':>{irq_width}}"]
+    if show_hint:
+        parts.append(pad_header_cell("affinity_hint", hint_col_width))
+    if show_affinity:
+        parts.append(pad_header_cell("affinity", affinity_col_width))
+    if show_numa:
+        parts.append(pad_header_cell("node", numa_col_width))
+    # Same width as compact_cpu_bar() (one cell per CPU); dots as neutral ruler.
+    parts.append(("." * n_cpus) if n_cpus else "")
+    parts.append("description")
+    return " ".join(parts)
 
 
 def format_irq_line(
@@ -310,6 +375,8 @@ def format_irq_line(
     counts: list[int],
     n_cpus: int,
     description: str,
+    show_hint: bool,
+    hint_padded: str,
     show_affinity: bool,
     affinity_padded: str,
     show_numa: bool,
@@ -318,6 +385,8 @@ def format_irq_line(
     irq_label = f"{irq_key}:"
     bar = compact_cpu_bar(counts, n_cpus)
     parts: list[str] = [f"{irq_label:>{irq_width}}"]
+    if show_hint:
+        parts.append(hint_padded)
     if show_affinity:
         parts.append(affinity_padded)
     if show_numa:
@@ -342,9 +411,14 @@ def main() -> None:
         help="Show smp_affinity_list column (default: omit)",
     )
     parser.add_argument(
+        "-H",
+        action="store_true",
+        help="Show affinity_hint; hex comma-separated masks are shown like smp_affinity_list",
+    )
+    parser.add_argument(
         "-n",
         action="store_true",
-        help="Show NUMA node from sys/class/net/<iface>/device/numa_node",
+        help="Show IRQ NUMA node from proc/irq/<n>/node",
     )
     parser.add_argument(
         "-v",
@@ -368,6 +442,7 @@ def main() -> None:
     root = os.path.abspath(args.path)
     aff_max = max(4, args.width)
     show_affinity = args.c
+    show_hint = args.H
     show_numa = args.n
     use_color = sys.stdout.isatty() and not args.no_color
 
@@ -384,32 +459,48 @@ def main() -> None:
 
     aff_displays: list[str] = []
     affinity_raws: list[str | None] = []
+    hint_displays: list[str] = []
     irq_nodes: list[int | None] = []
     for irq_key, _counts, _desc in rows:
         aff = read_smp_affinity_list(root, irq_key)
         affinity_raws.append(aff)
         raw = aff if aff is not None else "-"
         aff_displays.append(truncate_affinity(raw, aff_max))
+        hint = read_affinity_hint(root, irq_key)
+        hint_raw = hint if hint is not None else "-"
+        hint_display = format_affinity_hint_for_display(hint_raw)
+        hint_displays.append(truncate_affinity(hint_display, aff_max))
         irq_nodes.append(read_irq_numa_node(root, irq_key))
     affinity_col_w = max(len(a) for a in aff_displays) if aff_displays else 1
+    if show_affinity:
+        affinity_col_w = max(affinity_col_w, len("affinity"))
+    hint_col_w = max(len(h) for h in hint_displays) if hint_displays else 1
+    if show_hint:
+        hint_col_w = max(hint_col_w, len("affinity_hint"))
 
     numa_displays: list[str] = []
     if show_numa:
-        for _irq_key, _counts, desc in rows:
-            nv = read_numa_node(root, desc)
-            numa_displays.append(nv if nv is not None else "-")
+        for inode in irq_nodes:
+            numa_displays.append(str(inode) if inode is not None else "-")
     numa_col_w = (
         max(len(a) for a in numa_displays) if show_numa and numa_displays else 1
     )
+    if show_numa:
+        numa_col_w = max(numa_col_w, len("node"))
 
     title = "INTERRUPTS (per-CPU ▊/.)"
     print(title)
     if args.verbose:
         legend_bits = [f"{n_cpu} CPUs"]
+        if show_hint:
+            legend_bits.append(
+                "affinity_hint from proc/irq/<n>/affinity_hint "
+                "(comma-separated hex words → smp_affinity_list-style CPUs)"
+            )
         if show_affinity:
             legend_bits.append("affinity from proc/irq/<n>/smp_affinity_list")
         if show_numa:
-            legend_bits.append("NUMA from sys/class/net/<iface>/device/numa_node")
+            legend_bits.append("node from proc/irq/<n>/node (IRQ NUMA mapping)")
         legend_bits.append("▊ = non-zero count, . = zero")
         legend_bits.append(
             "highlight: affinity vs proc/irq/<n>/node CPUs "
@@ -417,14 +508,31 @@ def main() -> None:
         )
         print(f"    ({'; '.join(legend_bits)})")
 
+    print(
+        "    "
+        + format_column_headers(
+            irq_w,
+            show_hint,
+            hint_col_w,
+            show_affinity,
+            affinity_col_w,
+            show_numa,
+            numa_col_w,
+            n_cpu,
+        )
+    )
+
     numa_iter = numa_displays if show_numa else [""] * len(rows)
-    for (irq_key, counts, desc), aff_display, numa_raw, aff_raw, irq_node in zip(
+    hint_iter = hint_displays if show_hint else [""] * len(rows)
+    for (irq_key, counts, desc), aff_display, numa_raw, aff_raw, irq_node, hint_display in zip(
         rows,
         aff_displays,
         numa_iter,
         affinity_raws,
         irq_nodes,
+        hint_iter,
     ):
+        hint_padded = hint_display.ljust(hint_col_w)
         aff_padded = aff_display.ljust(affinity_col_w)
         numa_padded = numa_raw.ljust(numa_col_w)
         line = format_irq_line(
@@ -433,6 +541,8 @@ def main() -> None:
             counts,
             n_cpu,
             desc,
+            show_hint,
+            hint_padded,
             show_affinity,
             aff_padded,
             show_numa,
