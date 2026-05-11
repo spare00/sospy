@@ -1,13 +1,308 @@
 #!/usr/bin/env python3
 
 import os
+import re
+import sys
 import argparse
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 def scale_value(kb, unit):
     if unit == "K": return kb
     if unit == "M": return kb / 1024
     if unit == "G": return kb / (1024 * 1024)
+
+def parse_buddyinfo(path: str) -> List[Tuple[int, str, List[int]]]:
+    """
+    Parse /proc/buddyinfo lines into (node_id, zone_name, counts_per_order).
+    Each count is free blocks of that buddy order; order k holds 2^k base pages.
+    """
+    rows: List[Tuple[int, str, List[int]]] = []
+    prefix = re.compile(r"^Node\s+(\d+),\s*zone\s+")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                m = prefix.match(line)
+                if not m:
+                    continue
+                node = int(m.group(1))
+                rest = line[m.end() :].strip()
+                parts = rest.split()
+                if not parts:
+                    continue
+                i = len(parts) - 1
+                counts_rev: List[int] = []
+                while i >= 0 and parts[i].isdigit():
+                    counts_rev.append(int(parts[i]))
+                    i -= 1
+                if not counts_rev:
+                    continue
+                counts_rev.reverse()
+                zone = " ".join(parts[: i + 1]).strip()
+                rows.append((node, zone, counts_rev))
+    except FileNotFoundError:
+        pass
+    return rows
+
+
+def format_buddy_order_count(n: int) -> str:
+    """
+    Table cell for one buddy order: thousands separators, or scientific if huge
+    (often indicates a capture where spaces between counts were lost).
+    """
+    if n < 0:
+        return str(n)
+    if n == 0:
+        return "0"
+    # Per-order free counts are usually modest; monstrous values are rarely real.
+    if n >= 10**11 or len(str(n)) > 11:
+        return f"{n:.4e}"
+    return f"{n:,}"
+
+
+def buddy_zone_totals_kb(counts: List[int], page_kb: int = 4) -> Tuple[int, float]:
+    """Total free pages (4 KiB units) and same in KiB for this zone's buddy list."""
+    total_pages = 0
+    for order, c in enumerate(counts):
+        total_pages += c * (2**order)
+    return total_pages, float(total_pages * page_kb)
+
+
+def buddy_row_severity(counts: List[int], page_kb: int = 4) -> str:
+    """
+    Highlight class for buddy zone row: risk (fragmentation), o0, empty, or none.
+    """
+    total_pages, _ = buddy_zone_totals_kb(counts, page_kb)
+    if total_pages <= 0:
+        return "empty"
+    p0 = counts[0] if len(counts) > 0 else 0
+    p02 = sum(counts[i] * (2**i) for i in range(min(3, len(counts))))
+    pct0 = 100.0 * (p0 * 1) / total_pages
+    pct02 = 100.0 * p02 / total_pages
+    if pct02 >= 75:
+        return "risk"
+    if pct0 >= 50:
+        return "o0"
+    return "none"
+
+
+def buddy_color_line(line: str, severity: str, use_color: bool) -> str:
+    if not use_color or severity == "none":
+        return line
+    reset = "\033[0m"
+    if severity == "risk":
+        return f"\033[1m\033[91m{line}{reset}"
+    if severity == "o0":
+        return f"\033[1m\033[93m{line}{reset}"
+    if severity == "empty":
+        return f"\033[2m{line}{reset}"
+    return line
+
+
+def meminfo_path_for_buddy(buddy_path: str) -> Optional[str]:
+    """Locate proc/meminfo next to a buddyinfo capture (same dir or …/proc/)."""
+    d = os.path.dirname(os.path.abspath(buddy_path))
+    for cand in (
+        os.path.join(d, "meminfo"),
+        os.path.join(d, "proc", "meminfo"),
+    ):
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
+def print_buddyinfo(
+    buddy_path: str,
+    unit: str,
+    page_kb: int = 4,
+    use_color: bool = True,
+    verbose: bool = False,
+) -> None:
+    """
+    Rich buddyinfo: per-order counts, chunk sizes, free totals, fragmentation hints.
+    """
+    unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}[unit]
+    rows = parse_buddyinfo(buddy_path)
+    if not rows:
+        print(f"Warning: no buddyinfo data (missing or empty): {buddy_path}")
+        return
+
+    n_orders = max(len(r[2]) for r in rows)
+    print(f"\n/proc/buddyinfo  ({buddy_path})")
+    print(f"Assumed PAGE_SIZE = {page_kb} KiB per page for size totals.")
+    print(
+        "Each column is the count of free buddy blocks of that order "
+        f"(order k spans {page_kb}×2^k KiB per block).\n"
+    )
+    if use_color and verbose:
+        print(
+            "    (TTY colors: bold red = fragmentation risk; bold yellow = O0-heavy; dim = empty zone)\n"
+        )
+
+    total_buddy_kb = sum(buddy_zone_totals_kb(r[2], page_kb)[1] for r in rows)
+    meminfo_path = meminfo_path_for_buddy(buddy_path)
+    mem_total_kb: Optional[int] = None
+    if meminfo_path:
+        mi = parse_meminfo(meminfo_path)
+        mem_total_kb = mi.get("MemTotal")
+    buddy_s = scale_value(total_buddy_kb, unit)
+    print(
+        f"Buddy free (sum of all zones): {buddy_s:.2f} {unit_label}  "
+        f"({total_buddy_kb:,.0f} KiB as base pages)"
+    )
+    if mem_total_kb and mem_total_kb > 0:
+        pct_ram = 100.0 * total_buddy_kb / mem_total_kb
+        mt_s = scale_value(float(mem_total_kb), unit)
+        print(
+            f"MemTotal ({meminfo_path}): {mt_s:.2f} {unit_label}  "
+            f"→ buddy sum is {pct_ram:.2f}% of system RAM"
+        )
+        print(
+            "    (Buddy lists are only physically contiguous free pages in each zone; "
+            "this sum is usually well below MemFree.)\n"
+        )
+    else:
+        print(
+            "MemTotal: not found (place proc/meminfo next to buddyinfo or use a sosreport root "
+            "with proc/meminfo to show percent of RAM).\n"
+        )
+
+    zone_w = max(len(r[1]) for r in rows) + 1
+    node_col = 4  # "N0", "N10"
+    first_col_w = node_col + 1 + zone_w
+    hdr_orders = [f"O{o}" for o in range(n_orders)]
+    hdr_kb = [f"{page_kb * (2**o):g}k" for o in range(n_orders)]
+    # +1 gutter so right-aligned counts never touch (e.g. "92,115" + "613,415").
+    col_w = max(6, max(len(h) for h in hdr_orders) + 1) + 1
+    for _node, _zone, counts in rows:
+        for i in range(n_orders):
+            if i < len(counts):
+                col_w = max(col_w, len(format_buddy_order_count(counts[i])) + 1)
+    for h in hdr_kb:
+        col_w = max(col_w, len(h) + 1)
+
+    print(f"{'':{node_col}} {'zone':<{zone_w}}" + "".join(f"{h:>{col_w}}" for h in hdr_orders))
+    print(f"{'':{node_col}} {'KiB/blk':<{zone_w}}" + "".join(f"{h:>{col_w}}" for h in hdr_kb))
+    huge_note = False
+    for node, zone, counts in rows:
+        cells = []
+        for i in range(n_orders):
+            if i < len(counts):
+                v = counts[i]
+                fs = format_buddy_order_count(v)
+                if "e" in fs.lower():
+                    huge_note = True
+                cells.append(f"{fs:>{col_w}}")
+            else:
+                cells.append(f"{'-':>{col_w}}")
+        left = f"{('N' + str(node)):>{node_col}} {zone:<{zone_w}}"
+        print(f"{left:<{first_col_w}}" + "".join(cells))
+    if huge_note:
+        print(
+            "\n    Note: some counts use scientific notation (e.g. 9.2116e+16) when a value "
+            "is huge — often the sos capture lost spaces between buddy columns; "
+            "re-copy /proc/buddyinfo with spacing preserved.\n"
+        )
+
+    # --- Summary + fragmentation ---
+    zlab = max(zone_w - 2, 8)
+    print(
+        f"\n{'Node':<6}{'Zone':<{zlab}}{'Free pages':>14}{f'Free ({unit_label})':>16}"
+        f"{'% in O0':>10}{'% in O0-2':>12}{'max order':>10}  note"
+    )
+    sep = 6 + zlab + 14 + 16 + 10 + 12 + 10 + 28
+    print("-" * sep)
+
+    for node, zone, counts in rows:
+        total_pages, kb = buddy_zone_totals_kb(counts, page_kb)
+        sev = buddy_row_severity(counts, page_kb)
+        if total_pages <= 0:
+            pct0 = pct02 = 0.0
+            max_o_str = "-"
+            note = "empty"
+        else:
+            p0 = counts[0] if len(counts) > 0 else 0
+            p02 = sum(counts[i] * (2**i) for i in range(min(3, len(counts))))
+            pct0 = 100.0 * (p0 * 1) / total_pages
+            pct02 = 100.0 * p02 / total_pages
+            max_o = max((i for i, c in enumerate(counts) if c > 0), default=-1)
+            max_o_str = str(max_o) if max_o >= 0 else "-"
+            if pct02 >= 75:
+                note = "many small blocks (fragmentation risk)"
+            elif pct0 >= 50:
+                note = "O0-heavy"
+            elif max_o >= 6:
+                note = "large blocks present"
+            else:
+                note = ""
+        line = (
+            f"{node:<6}{zone:<{zlab}}{total_pages:>14,}"
+            f"{scale_value(kb, unit):>16.2f}"
+            f"{pct0:>9.1f}%"
+            f"{pct02:>11.1f}%"
+            f"{max_o_str:>10}  {note}"
+        )
+        print(buddy_color_line(line, sev, use_color))
+
+    # --- Node rollup ---
+    by_node: dict[int, Tuple[int, float]] = {}
+    for node, zone, counts in rows:
+        tp, kb = buddy_zone_totals_kb(counts, page_kb)
+        prev = by_node.get(node, (0, 0.0))
+        by_node[node] = (prev[0] + tp, prev[1] + kb)
+    if len(by_node) > 1:
+        print("\nPer-node buddy free (sum of zones):")
+        for node in sorted(by_node.keys()):
+            tp, kb = by_node[node]
+            print(
+                f"  Node {node}: {tp:,} pages  "
+                f"{scale_value(kb, unit):.2f} {unit_label}"
+            )
+
+    # --- Stacked bar: width proportional to free pages in each order ---
+    print(
+        "\nOrder mix (each row = 40 chars; segment width ~ share of zone free pages; "
+        "O0 left → higher orders right):"
+    )
+    bar_w = 40
+    suffix_w = (
+        max(len(f"O0..O{max(0, len(r[2]) - 1)}") for r in rows) if rows else 8
+    )
+    for node, zone, counts in rows:
+        total_pages, _ = buddy_zone_totals_kb(counts, page_kb)
+        if total_pages <= 0:
+            bar_fill = "(empty)".ljust(bar_w)[:bar_w]
+        else:
+            widths: List[int] = []
+            acc = 0
+            for o, c in enumerate(counts):
+                contrib = c * (2**o)
+                if o < len(counts) - 1:
+                    w = int(round(bar_w * contrib / total_pages))
+                    w = max(0, min(w, bar_w - acc))
+                else:
+                    w = max(0, bar_w - acc)
+                widths.append(w)
+                acc += w
+            chars = "█▓░▒"
+            parts = []
+            for o, w in enumerate(widths):
+                parts.append(chars[o % len(chars)] * w)
+            bar_fill = "".join(parts)
+            if len(bar_fill) < bar_w:
+                bar_fill = bar_fill + " " * (bar_w - len(bar_fill))
+            else:
+                bar_fill = bar_fill[:bar_w]
+        om = len(counts) - 1 if counts else 0
+        prefix = f"{('N' + str(node)):>{node_col}} {zone:<{zone_w}}"
+        prefix = f"{prefix:<{first_col_w}}"
+        suffix = f"O0..O{om}"
+        mix_line = f"{prefix}[{bar_fill}] {suffix:>{suffix_w}}"
+        print(buddy_color_line(mix_line, buddy_row_severity(counts, page_kb), use_color))
+    print()
+
 
 def parse_meminfo(path: str) -> dict:
     out = {}
@@ -413,7 +708,17 @@ def main():
     parser.add_argument("-K", action="store_const", const="K", dest="unit", help="Show output in KiB")
     parser.add_argument("-M", action="store_const", const="M", dest="unit", help="Show output in MiB")
     parser.add_argument("-G", action="store_const", const="G", dest="unit", help="Show output in GiB")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Show formula for unaccounted memory")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show formula for unaccounted memory (-i); TTY color legend for buddy (-b)",
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        help="Disable ANSI colors (buddy -b highlights)",
+    )
     parser.add_argument("path", nargs="?", help="sosreport root or /proc/meminfo file (default: cwd)")
 
     mode = parser.add_mutually_exclusive_group()
@@ -428,11 +733,18 @@ def main():
     mode.add_argument("-u", nargs="?", const=True, metavar="PS_FILE",
                       help="Show top 10 users by aggregated RSS. Optionally specify a ps file path; "
                            "defaults to <sosroot>/ps or ./ps")
+    mode.add_argument(
+        "-b",
+        nargs="?",
+        const=True,
+        metavar="BUDDYINFO_FILE",
+        help="Show /proc/buddyinfo: per-order free blocks, totals, fragmentation hints, node rollups",
+    )
 
     args = parser.parse_args()
 
     # Default to -i mode when none of the mode flags is given
-    if not args.i and not args.p and not args.c and not args.u:
+    if not args.i and not args.p and not args.c and not args.u and not args.b:
         args.i = True
 
     path = args.path or "."
@@ -486,6 +798,19 @@ def main():
         else:
             ps_path = os.path.join(path, "ps")
         print_top_users(ps_path)
+
+    elif args.b:
+        if isinstance(args.b, str):
+            buddy_path = args.b
+        elif os.path.isfile(path) and "buddyinfo" in os.path.basename(path).lower():
+            buddy_path = path
+        else:
+            buddy_path = os.path.join(path, "proc", "buddyinfo")
+        use_color = sys.stdout.isatty() and not args.no_color
+        print_buddyinfo(
+            buddy_path, unit, use_color=use_color, verbose=args.verbose
+        )
+
 
 if __name__ == "__main__":
     main()
