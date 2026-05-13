@@ -7,9 +7,11 @@ from collections import defaultdict
 
 # === Common Utilities ===
 
-def scale_value(value, from_unit="P", to_unit="G", pagesize_kb=4):
+DEFAULT_PAGE_SIZE_BYTES = 4096
+
+def scale_value(value, from_unit="P", to_unit="G", pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES):
     if from_unit == 'P':
-        value_kb = value * pagesize_kb
+        value_kb = value * pagesize_bytes / 1024
     elif from_unit == 'K':
         value_kb = value
     elif from_unit == 'M':
@@ -26,7 +28,7 @@ def scale_value(value, from_unit="P", to_unit="G", pagesize_kb=4):
     elif to_unit == 'G':
         return value_kb / (1024 * 1024)
     elif to_unit == 'P':
-        return value_kb / pagesize_kb
+        return value_kb * 1024 / pagesize_bytes
     else:
         raise ValueError('Unsupported to_unit')
 
@@ -90,16 +92,16 @@ def extract_rss_and_swap_usage(oom_events, group_by="process"):
 
     return usage_info
 
-def display_usage(event_usage, group_by="process", include_swap=False, unit="G", pagesize_kb=4):
+def display_usage(event_usage, group_by="process", include_swap=False, unit="G", pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES):
     unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'GB')
 
     for event, usage in event_usage.items():
         sorted_usage = sorted(usage.items(), key=lambda x: x[1]['rss'], reverse=True)
-        total_rss = scale_value(sum(data['rss'] for data in usage.values()), 'P', unit, pagesize_kb)
+        total_rss = scale_value(sum(data['rss'] for data in usage.values()), 'P', unit, pagesize_bytes)
         print(f"\nEvent: {event}")
         if group_by == "process":
             if include_swap:
-                total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_kb)
+                total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_bytes)
                 print(
                     f"{'RSS (' + unit_label + ')':>12} {'Swap (' + unit_label + ')':>12} "
                     f"{'UID':>7} {'TGID':>7} {'PID':>8} {'Comm':<20}"
@@ -110,20 +112,20 @@ def display_usage(event_usage, group_by="process", include_swap=False, unit="G",
                     f"{'PID':>8} {'Comm':<20}"
                 )
         elif include_swap:
-            total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_kb)
+            total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_bytes)
             print(f"{'RSS (' + unit_label + ')':>12} {'Swap (' + unit_label + ')':>12} {'Processes':>10} {'Comm':<20}")
         else:
             print(f"{'RSS (' + unit_label + ')':>10} {'Processes':>10} {'Comm':<20}")
 
         for key, data in sorted_usage[:10]:
-            rss = scale_value(data['rss'], 'P', unit, pagesize_kb)
+            rss = scale_value(data['rss'], 'P', unit, pagesize_bytes)
             count = data['count']
             if group_by == "process":
                 pid, comm = key
                 uid = data['uid']
                 tgid = data['tgid']
                 if include_swap:
-                    swap = scale_value(data['swap'], 'P', unit, pagesize_kb)
+                    swap = scale_value(data['swap'], 'P', unit, pagesize_bytes)
                     print(
                         f"{rss:>10.2f} {swap:>12.2f} {uid:>7} {tgid:>7} "
                         f"{pid:>8} {comm:<20}"
@@ -131,7 +133,7 @@ def display_usage(event_usage, group_by="process", include_swap=False, unit="G",
                 else:
                     print(f"{rss:>10.2f} {uid:>7} {tgid:>7} {pid:>8} {comm:<20}")
             elif include_swap:
-                swap = scale_value(data['swap'], 'P', unit, pagesize_kb)
+                swap = scale_value(data['swap'], 'P', unit, pagesize_bytes)
                 print(f"{rss:>10.2f} {swap:>12.2f} {count:>10} {key:<20}")
             else:
                 print(f"{rss:>10.2f} {count:>10} {key:<20}")
@@ -168,11 +170,22 @@ def main():
     unit_group.add_argument('-P', action='store_const', const='P', dest='unit', help='Display memory in pages')
     parser.set_defaults(unit='G')
 
-    parser.add_argument('--pagesize', type=int, default=4, help='Page size in KB (default: 4)')
+    parser.add_argument(
+        '--pagesize',
+        type=int,
+        default=DEFAULT_PAGE_SIZE_BYTES,
+        metavar='BYTES',
+        help='Machine page size in bytes for page and memory unit conversions (default: %(default)s, x86_64). '
+        'Example: RHEL ppc64le often uses 65536.',
+    )
     parser.add_argument('-s', '--swap', action='store_true', help='Include swap usage (for -c / -p)')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('log_file', type=str, help='Path to OOM log file')
     args = parser.parse_args()
+
+    if args.pagesize <= 0:
+        print('Error: --pagesize must be a positive integer (bytes).', file=sys.stderr)
+        sys.exit(1)
 
     # Default to per-process (-p) if no dump mode or meminfo is set
     if not args.meminfo and not args.commands and not args.processes:
@@ -187,7 +200,7 @@ def main():
             group_by=group_by,
             include_swap=args.swap,
             unit=args.unit,
-            pagesize_kb=args.pagesize,
+            pagesize_bytes=args.pagesize,
         )
 
     elif args.meminfo:
@@ -202,11 +215,11 @@ def main():
                 mem_summary, total_pages, unaccounted = calculate_memory_usage(
                     memory_info, total_hugepages_kb, used_hugepages_kb,
                     show_full=True, unit=args.unit,
-                    pagesize_kb=args.pagesize, verbose=args.verbose
+                    pagesize_bytes=args.pagesize, verbose=args.verbose
                 )
                 print_summary(
                     mem_summary, total_pages, unaccounted, timestamp,
-                    unit=args.unit, pagesize_kb=args.pagesize,
+                    unit=args.unit, pagesize_bytes=args.pagesize,
                     show_unaccounted=True, verbose=args.verbose
                 )
 

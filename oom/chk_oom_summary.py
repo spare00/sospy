@@ -6,19 +6,23 @@ import argparse
 
 from config import patterns, mem_info_pattern, oom_pattern
 
-def scale_value(value, from_unit="P", to_unit="G", pagesize_kb=4):
+DEFAULT_PAGE_SIZE_BYTES = 4096
+
+def scale_value(value, from_unit="P", to_unit="G", pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES):
     """
     Convert a memory value from pages or KB to the desired unit.
     - from_unit: "P" or "K"
-    - to_unit: "K", "M", "G"
+    - to_unit: "K", "M", "G", "P"
     """
-    kb = value * pagesize_kb if from_unit == "P" else value
+    kb = value * pagesize_bytes / 1024 if from_unit == "P" else value
     if to_unit == "K":
         return kb
     elif to_unit == "M":
         return kb / 1024
     elif to_unit == "G":
         return kb / (1024 * 1024)
+    elif to_unit == "P":
+        return kb * 1024 / pagesize_bytes
     return kb
 
 
@@ -97,13 +101,13 @@ def extract_memory_info(log_data):
     return mem_info_list
 
 def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
-                           show_full, unit='G', pagesize_kb=4, verbose=False):
+                           show_full, unit='G', pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES, verbose=False):
     """Calculate memory usage summary from memory info."""
 
     total_memory_pages = memory_info.get('total_pages_ram', 0)
     # Convert hugepage memory from KB to MB
-    hugepages_total_pages = hugepages_total_kb / pagesize_kb
-    hugepages_used_pages = hugepages_used_kb / pagesize_kb
+    hugepages_total_pages = hugepages_total_kb * 1024 / pagesize_bytes
+    hugepages_used_pages = hugepages_used_kb * 1024 / pagesize_bytes
     memory_summary = {
         'Active Anon': memory_info['active_anon'],
         'Inactive Anon': memory_info['inactive_anon'],
@@ -123,8 +127,8 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
     }
 
     # Add swap usage to the memory summary
-    swap_free_pages = memory_info.get('free_swap', 0) / pagesize_kb
-    swap_total_pages = memory_info.get('total_swap', 0) / pagesize_kb
+    swap_free_pages = memory_info.get('free_swap', 0) * 1024 / pagesize_bytes
+    swap_total_pages = memory_info.get('total_swap', 0) * 1024 / pagesize_bytes
     swap_used_pages = swap_total_pages - swap_free_pages
 
     # Add swap usage to the memory summary
@@ -181,27 +185,27 @@ def calculate_memory_usage(memory_info, hugepages_total_kb, hugepages_used_kb,
               " - Free Cma"
               " - Huge pages\n")
 
-        print(f"{scale_value(unaccounted_pages, 'P', 'M', pagesize_kb):.2f} = "
-              f"{scale_value(total_memory_pages, 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('active_anon', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('inactive_anon', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('isolated_anon', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('pagecache', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('swapcache', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('slab_reclaimable', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('slab_unreclaimable', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('pagetables', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('free', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('reserved', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('bounce', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(memory_info.get('free_cma', 0), 'P', 'M', pagesize_kb):.2f} "
-              f"- {scale_value(hugepages_total_pages, 'P', 'M', pagesize_kb):.2f}")
+        print(f"{scale_value(unaccounted_pages, 'P', 'M', pagesize_bytes):.2f} = "
+              f"{scale_value(total_memory_pages, 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('active_anon', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('inactive_anon', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('isolated_anon', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('pagecache', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('swapcache', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('slab_reclaimable', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('slab_unreclaimable', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('pagetables', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('free', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('reserved', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('bounce', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(memory_info.get('free_cma', 0), 'P', 'M', pagesize_bytes):.2f} "
+              f"- {scale_value(hugepages_total_pages, 'P', 'M', pagesize_bytes):.2f}")
 
     # Return memory summary, total memory details, etc.
     return memory_summary, total_memory_pages, unaccounted_pages
 
 def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timestamp,
-                  unit='G', pagesize_kb=4, show_unaccounted=True, verbose=False):
+                  unit='G', pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES, show_unaccounted=True, verbose=False):
     """Prints the memory summary in a formatted table and displays the total memory size at the bottom."""
 
     unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'GB')
@@ -210,10 +214,10 @@ def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timesta
     print(f"{'Category':<25} {unit_label:>15}")
     print("=" * 40)
     print(f"{'Total Memory':<25}", end=' ')
-    print(f"{scale_value(total_memory_pages, 'P', unit, pagesize_kb):>15,.2f}")
+    print(f"{scale_value(total_memory_pages, 'P', unit, pagesize_bytes):>15,.2f}")
 
     for key, pages in memory_summary.items():
-        val = scale_value(pages, 'P', unit, pagesize_kb)
+        val = scale_value(pages, 'P', unit, pagesize_bytes)
 
         print(f"{key:<25} {val:>15,.2f}")
 
@@ -222,7 +226,7 @@ def print_summary(memory_summary, total_memory_pages, unaccounted_pages, timesta
     # Show unaccounted memory if requested
     if show_unaccounted:
         print(f"{'Unaccounted Memory':<25}", end=' ')
-        print(f"{scale_value(unaccounted_pages, 'P', unit, pagesize_kb):>15,.2f}")
+        print(f"{scale_value(unaccounted_pages, 'P', unit, pagesize_bytes):>15,.2f}")
 
 def main():
     # Use argparse for flexible option parsing
@@ -234,7 +238,14 @@ def main():
     parser.set_defaults(unit="G")
 
     # Define the flags
-    parser.add_argument('--pagesize', type=int, default=4, help="Page size in KB (default: 4)")
+    parser.add_argument(
+        '--pagesize',
+        type=int,
+        default=DEFAULT_PAGE_SIZE_BYTES,
+        metavar='BYTES',
+        help='Machine page size in bytes for page and memory unit conversions (default: %(default)s, x86_64). '
+        'Example: RHEL ppc64le often uses 65536.',
+    )
 
     parser.add_argument('-f', '--full', action='store_true', help="Show full memory info.")
     parser.add_argument('-v', '--verbose', action='store_true', help="Show verbose memory info.")
@@ -242,7 +253,12 @@ def main():
 
     # Parse arguments
     args = parser.parse_args()
-    pagesize_kb = args.pagesize
+
+    if args.pagesize <= 0:
+        print('Error: --pagesize must be a positive integer (bytes).', file=sys.stderr)
+        sys.exit(1)
+
+    pagesize_bytes = args.pagesize
     show_unaccounted = True; #args.unaccounted
     show_full = args.full
     log_filename = args.log_filename
@@ -256,10 +272,10 @@ def main():
     # Iterate over each memory event in the log file
     for timestamp, memory_info, total_hugepages_kb, used_hugepages_kb in mem_info_list:
         # Calculate memory usage, now including hugepage memory
-        memory_summary, total_memory_pages, unaccounted_pages = calculate_memory_usage(memory_info, total_hugepages_kb, used_hugepages_kb, show_full, unit, pagesize_kb, verbose)
+        memory_summary, total_memory_pages, unaccounted_pages = calculate_memory_usage(memory_info, total_hugepages_kb, used_hugepages_kb, show_full, unit, pagesize_bytes, verbose)
 
         # Print memory summary for each event
-        print_summary(memory_summary, total_memory_pages, unaccounted_pages, timestamp, unit, pagesize_kb, show_unaccounted, verbose)
+        print_summary(memory_summary, total_memory_pages, unaccounted_pages, timestamp, unit, pagesize_bytes, show_unaccounted, verbose)
 
 if __name__ == "__main__":
     main()

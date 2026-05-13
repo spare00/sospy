@@ -5,9 +5,11 @@ import sys
 import argparse
 from collections import defaultdict
 
-def scale_value(value, from_unit="P", to_unit="G", pagesize_kb=4):
+DEFAULT_PAGE_SIZE_BYTES = 4096
+
+def scale_value(value, from_unit="P", to_unit="G", pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES):
     if from_unit == 'P':
-        value_kb = value * pagesize_kb
+        value_kb = value * pagesize_bytes / 1024
     elif from_unit == 'K':
         value_kb = value
     elif from_unit == 'M':
@@ -24,7 +26,7 @@ def scale_value(value, from_unit="P", to_unit="G", pagesize_kb=4):
     elif to_unit == 'G':
         return value_kb / (1024 * 1024)
     elif to_unit == 'P':
-        return value_kb / pagesize_kb
+        return value_kb * 1024 / pagesize_bytes
     else:
         raise ValueError('Unsupported to_unit')
 
@@ -82,7 +84,7 @@ def extract_rss_and_swap_usage(oom_events):
 
     return usage_info
 
-def display_usage(event_usage, include_swap=False, unit="G", pagesize_kb=4):
+def display_usage(event_usage, include_swap=False, unit="G", pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES):
     """
     Displays the RSS and optionally swap usage information in GB only.
     Args:
@@ -94,19 +96,19 @@ def display_usage(event_usage, include_swap=False, unit="G", pagesize_kb=4):
 
     for event, usage in event_usage.items():
         sorted_usage = sorted(usage.items(), key=lambda x: x[1]['rss'], reverse=True)
-        total_rss = scale_value(sum(data['rss'] for data in usage.values()), 'P', unit, pagesize_kb)
+        total_rss = scale_value(sum(data['rss'] for data in usage.values()), 'P', unit, pagesize_bytes)
         print(f"\nEvent: {event}")
         if include_swap:
-            total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_kb)
+            total_swap = scale_value(sum(data['swap'] for data in usage.values()), 'P', unit, pagesize_bytes)
             print(f"{'RSS (' + unit_label + ')':>12} {'Swap (' + unit_label + ')':>12} {'Count':>8} {'Name':<20}")
         else:
             print(f"{'RSS (' + unit_label + ')':>10} {'Count':>10} {'Name':<20}")
 
         for name, data in sorted_usage[:10]:  # Show only the top 10 items
-            rss = scale_value(data['rss'], 'P', unit, pagesize_kb)
+            rss = scale_value(data['rss'], 'P', unit, pagesize_bytes)
             count = data['count']
             if include_swap:
-                swap = scale_value(data['swap'], 'P', unit, pagesize_kb)
+                swap = scale_value(data['swap'], 'P', unit, pagesize_bytes)
                 print(f"{rss:>10.2f} {swap:>12.2f} {count:>10} {name:<20}")
             else:
                 print(f"{rss:>10.2f} {count:>10} {name:<20}")
@@ -130,15 +132,26 @@ def main():
 
     parser.add_argument('log_file', help="Path to the OOM log file")
     parser.add_argument('-s', '--swap', action='store_true', help="Include swap usage in the output")
-    parser.add_argument('--pagesize', type=int, default=4, help="Page size in KB (default: 4)")
+    parser.add_argument(
+        '--pagesize',
+        type=int,
+        default=DEFAULT_PAGE_SIZE_BYTES,
+        metavar='BYTES',
+        help='Machine page size in bytes for page and memory unit conversions (default: %(default)s, x86_64). '
+        'Example: RHEL ppc64le often uses 65536.',
+    )
 
     args = parser.parse_args()
+
+    if args.pagesize <= 0:
+        print('Error: --pagesize must be a positive integer (bytes).', file=sys.stderr)
+        sys.exit(1)
 
     # Process the log
     oom_events = parse_oom_log(args.log_file)
     usage_info = extract_rss_and_swap_usage(oom_events)  # return in pages
 
-    display_usage(usage_info, args.swap, unit=args.unit, pagesize_kb=args.pagesize)
+    display_usage(usage_info, args.swap, unit=args.unit, pagesize_bytes=args.pagesize)
 
 if __name__ == "__main__":
     main()
