@@ -4,9 +4,9 @@ import sys
 import argparse
 
 DEFAULT_TOP_N = 10
-PAGE_SIZE_KB = 4  # Assuming 4 KB pages
+DEFAULT_PAGE_SIZE_BYTES = 4096
 
-def parse_slabinfo(file_path):
+def parse_slabinfo(file_path, page_size_bytes):
     try:
         with open(file_path, 'r') as file:
             lines = file.readlines()
@@ -26,7 +26,7 @@ def parse_slabinfo(file_path):
             except ValueError:
                 continue
 
-            memory_usage_kib = pagesperslab * num_slabs * PAGE_SIZE_KB
+            memory_usage_kib = (pagesperslab * num_slabs * page_size_bytes) // 1024
             slab_data.append((memory_usage_kib, name))
             total_memory_kib += memory_usage_kib
 
@@ -85,7 +85,20 @@ def main():
     unit_group.add_argument("-M", "--mib", action="store_true", help="Display memory in MiB.")
     unit_group.add_argument("-G", "--gib", action="store_true", help="Display memory in GiB (default).")
 
+    parser.add_argument(
+        "--pagesize",
+        type=int,
+        default=DEFAULT_PAGE_SIZE_BYTES,
+        metavar="BYTES",
+        help="Machine page size in bytes for slab memory math (default: %(default)s, x86_64). "
+        "Example: RHEL ppc64le often uses 65536.",
+    )
+
     args = parser.parse_args()
+
+    if args.pagesize <= 0:
+        print("Error: --pagesize must be a positive integer (bytes).", file=sys.stderr)
+        sys.exit(1)
 
     # Determine display unit
     if args.kib:
@@ -96,7 +109,7 @@ def main():
         unit = "G"
 
     # Get slabinfo data
-    slab_data, total_memory_kib = parse_slabinfo(args.file)
+    slab_data, total_memory_kib = parse_slabinfo(args.file, args.pagesize)
 
     # Determine how many entries to show
     if args.all:

@@ -6,6 +6,9 @@ import sys
 import argparse
 from typing import List, Optional, Tuple
 
+DEFAULT_PAGE_SIZE_BYTES = 4096
+
+
 def scale_value(kb, unit):
     if unit == "K": return kb
     if unit == "M": return kb / 1024
@@ -62,19 +65,20 @@ def format_buddy_order_count(n: int) -> str:
     return f"{n:,}"
 
 
-def buddy_zone_totals_kb(counts: List[int], page_kb: int = 4) -> Tuple[int, float]:
-    """Total free pages (4 KiB units) and same in KiB for this zone's buddy list."""
+def buddy_zone_totals_kb(counts: List[int], pagesize_bytes: int = DEFAULT_PAGE_SIZE_BYTES) -> Tuple[int, float]:
+    """Total free base pages and total free KiB for this zone's buddy list."""
     total_pages = 0
     for order, c in enumerate(counts):
         total_pages += c * (2**order)
-    return total_pages, float(total_pages * page_kb)
+    total_kib = total_pages * pagesize_bytes / 1024
+    return total_pages, float(total_kib)
 
 
-def buddy_row_severity(counts: List[int], page_kb: int = 4) -> str:
+def buddy_row_severity(counts: List[int], pagesize_bytes: int = DEFAULT_PAGE_SIZE_BYTES) -> str:
     """
     Highlight class for buddy zone row: risk (fragmentation), o0, empty, or none.
     """
-    total_pages, _ = buddy_zone_totals_kb(counts, page_kb)
+    total_pages, _ = buddy_zone_totals_kb(counts, pagesize_bytes)
     if total_pages <= 0:
         return "empty"
     p0 = counts[0] if len(counts) > 0 else 0
@@ -116,7 +120,7 @@ def meminfo_path_for_buddy(buddy_path: str) -> Optional[str]:
 def print_buddyinfo(
     buddy_path: str,
     unit: str,
-    page_kb: int = 4,
+    pagesize_bytes: int = DEFAULT_PAGE_SIZE_BYTES,
     use_color: bool = True,
     verbose: bool = False,
 ) -> None:
@@ -130,18 +134,21 @@ def print_buddyinfo(
         return
 
     n_orders = max(len(r[2]) for r in rows)
+    page_kib = pagesize_bytes / 1024
     print(f"\n/proc/buddyinfo  ({buddy_path})")
-    print(f"Assumed PAGE_SIZE = {page_kb} KiB per page for size totals.")
+    print(
+        f"Assumed PAGE_SIZE = {pagesize_bytes} bytes ({page_kib:g} KiB per page) for size totals."
+    )
     print(
         "Each column is the count of free buddy blocks of that order "
-        f"(order k spans {page_kb}×2^k KiB per block).\n"
+        f"(order k spans {page_kib:g}×2^k KiB per block).\n"
     )
     if use_color and verbose:
         print(
             "    (TTY colors: bold red = fragmentation risk; bold yellow = O0-heavy; dim = empty zone)\n"
         )
 
-    total_buddy_kb = sum(buddy_zone_totals_kb(r[2], page_kb)[1] for r in rows)
+    total_buddy_kb = sum(buddy_zone_totals_kb(r[2], pagesize_bytes)[1] for r in rows)
     meminfo_path = meminfo_path_for_buddy(buddy_path)
     mem_total_kb: Optional[int] = None
     if meminfo_path:
@@ -173,7 +180,7 @@ def print_buddyinfo(
     node_col = 4  # "N0", "N10"
     first_col_w = node_col + 1 + zone_w
     hdr_orders = [f"O{o}" for o in range(n_orders)]
-    hdr_kb = [f"{page_kb * (2**o):g}k" for o in range(n_orders)]
+    hdr_kb = [f"{(pagesize_bytes * (2**o) / 1024):g}k" for o in range(n_orders)]
     # +1 gutter so right-aligned counts never touch (e.g. "92,115" + "613,415").
     col_w = max(6, max(len(h) for h in hdr_orders) + 1) + 1
     for _node, _zone, counts in rows:
@@ -216,8 +223,8 @@ def print_buddyinfo(
     print("-" * sep)
 
     for node, zone, counts in rows:
-        total_pages, kb = buddy_zone_totals_kb(counts, page_kb)
-        sev = buddy_row_severity(counts, page_kb)
+        total_pages, kb = buddy_zone_totals_kb(counts, pagesize_bytes)
+        sev = buddy_row_severity(counts, pagesize_bytes)
         if total_pages <= 0:
             pct0 = pct02 = 0.0
             max_o_str = "-"
@@ -249,7 +256,7 @@ def print_buddyinfo(
     # --- Node rollup ---
     by_node: dict[int, Tuple[int, float]] = {}
     for node, zone, counts in rows:
-        tp, kb = buddy_zone_totals_kb(counts, page_kb)
+        tp, kb = buddy_zone_totals_kb(counts, pagesize_bytes)
         prev = by_node.get(node, (0, 0.0))
         by_node[node] = (prev[0] + tp, prev[1] + kb)
     if len(by_node) > 1:
@@ -271,7 +278,7 @@ def print_buddyinfo(
         max(len(f"O0..O{max(0, len(r[2]) - 1)}") for r in rows) if rows else 8
     )
     for node, zone, counts in rows:
-        total_pages, _ = buddy_zone_totals_kb(counts, page_kb)
+        total_pages, _ = buddy_zone_totals_kb(counts, pagesize_bytes)
         if total_pages <= 0:
             bar_fill = "(empty)".ljust(bar_w)[:bar_w]
         else:
@@ -300,7 +307,7 @@ def print_buddyinfo(
         prefix = f"{prefix:<{first_col_w}}"
         suffix = f"O0..O{om}"
         mix_line = f"{prefix}[{bar_fill}] {suffix:>{suffix_w}}"
-        print(buddy_color_line(mix_line, buddy_row_severity(counts, page_kb), use_color))
+        print(buddy_color_line(mix_line, buddy_row_severity(counts, pagesize_bytes), use_color))
     print()
 
 
@@ -719,6 +726,13 @@ def main():
         action="store_true",
         help="Disable ANSI colors (buddy -b highlights)",
     )
+    parser.add_argument(
+        "--pagesize",
+        type=int,
+        default=DEFAULT_PAGE_SIZE_BYTES,
+        metavar="BYTES",
+        help="Machine page size in bytes for buddyinfo totals (default: %(default)s, x86_64).",
+    )
     parser.add_argument("path", nargs="?", help="sosreport root or /proc/meminfo file (default: cwd)")
 
     mode = parser.add_mutually_exclusive_group()
@@ -742,6 +756,10 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.pagesize <= 0:
+        print("Error: --pagesize must be a positive integer (bytes).", file=sys.stderr)
+        sys.exit(1)
 
     # Default to -i mode when none of the mode flags is given
     if not args.i and not args.p and not args.c and not args.u and not args.b:
@@ -808,7 +826,11 @@ def main():
             buddy_path = os.path.join(path, "proc", "buddyinfo")
         use_color = sys.stdout.isatty() and not args.no_color
         print_buddyinfo(
-            buddy_path, unit, use_color=use_color, verbose=args.verbose
+            buddy_path,
+            unit,
+            pagesize_bytes=args.pagesize,
+            use_color=use_color,
+            verbose=args.verbose,
         )
 
 
