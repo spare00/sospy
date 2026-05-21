@@ -63,6 +63,96 @@ def parse_oom_log(file_path):
     return oom_events
 
 
+# === Unreclaimable Slab Parser ===
+
+def parse_memory_to_kb(value, unit):
+    """Convert a numeric size with optional unit suffix to KiB."""
+    unit = (unit or 'KB').upper()
+    value = float(value)
+    if unit in ('B',):
+        return value / 1024
+    if unit in ('KB', 'K'):
+        return value
+    if unit in ('MB', 'M'):
+        return value * 1024
+    if unit in ('GB', 'G'):
+        return value * 1024 * 1024
+    raise ValueError(f'Unsupported memory unit: {unit}')
+
+
+KERNEL_LOG_PAYLOAD = re.compile(r'\[[\d.]+\]\s*(.*)$')
+
+SLAB_LINE_PATTERN = re.compile(
+    r'(?P<name>\S+)\s+'
+    r'(?P<used>\d+(?:\.\d+)?)\s*(?P<used_unit>KB|MB|GB|B|kB|mB|gB)\s+'
+    r'(?P<total>\d+(?:\.\d+)?)\s*(?P<total_unit>KB|MB|GB|B|kB|mB|gB)'
+)
+
+
+def slab_line_payload(line):
+    """Return log text after the kernel [uptime] timestamp, if present."""
+    if match := KERNEL_LOG_PAYLOAD.search(line):
+        return match.group(1)
+    return line
+
+
+def extract_slab_usage(oom_events):
+    """Extract unreclaimable slab usage from each OOM event block."""
+    slab_info = defaultdict(dict)
+
+    for event, lines in oom_events.items():
+        in_slab_section = False
+        for line in lines:
+            if 'Unreclaimable slab info:' in line:
+                in_slab_section = True
+                continue
+            if not in_slab_section:
+                continue
+            if 'Tasks state' in line:
+                break
+            if 'Name' in line and 'Used' in line and 'Total' in line:
+                continue
+            if match := SLAB_LINE_PATTERN.search(slab_line_payload(line)):
+                name = match.group('name')
+                used_kb = parse_memory_to_kb(match.group('used'), match.group('used_unit'))
+                total_kb = parse_memory_to_kb(match.group('total'), match.group('total_unit'))
+                slab_info[event][name] = {'used_kb': used_kb, 'total_kb': total_kb}
+
+    return slab_info
+
+
+def display_slab_usage(event_slabs, unit='G', top_n=10, pagesize_bytes=DEFAULT_PAGE_SIZE_BYTES):
+    unit_label = {'P': 'Pages', 'K': 'KiB', 'M': 'MB', 'G': 'GB'}.get(unit, 'GB')
+
+    for event, slabs in event_slabs.items():
+        if not slabs:
+            print(f"\nEvent: {event}")
+            print('[!] No unreclaimable slab info found in this event.')
+            continue
+
+        sorted_slabs = sorted(slabs.items(), key=lambda x: x[1]['used_kb'], reverse=True)
+        total_used = sum(data['used_kb'] for data in slabs.values())
+        total_alloc = sum(data['total_kb'] for data in slabs.values())
+
+        print(f"\nEvent: {event}")
+        print(
+            f"{'Used (' + unit_label + ')':>14} {'Total (' + unit_label + ')':>14} "
+            f"{'Slab Name':<30}"
+        )
+        for name, data in sorted_slabs[:top_n]:
+            used = scale_value(data['used_kb'], 'K', unit, pagesize_bytes)
+            total = scale_value(data['total_kb'], 'K', unit, pagesize_bytes)
+            print(f"{used:>14.2f} {total:>14.2f} {name:<30}")
+
+        sep = '-' * 62
+        print(sep)
+        print(
+            f"{scale_value(total_used, 'K', unit, pagesize_bytes):>14.2f} "
+            f"{scale_value(total_alloc, 'K', unit, pagesize_bytes):>14.2f} "
+            f"{'Total (all slabs)':>25}"
+        )
+
+
 # === RSS + Swap Usage Parser ===
 
 def extract_rss_and_swap_usage(oom_events, group_by="process"):
@@ -162,6 +252,7 @@ def main():
     group.add_argument('-i', '--meminfo', action='store_true', help='Show memory usage summary (Mem-Info)')
     group.add_argument('-c', '--commands', action='store_true', help='Aggregate RSS/swap by command name (comm)')
     group.add_argument('-p', '--processes', action='store_true', help='List RSS/swap per process (PID + comm from OOM dump)')
+    group.add_argument('--slab', action='store_true', help='Show top unreclaimable slab consumers from OOM dump')
 
     unit_group = parser.add_mutually_exclusive_group()
     unit_group.add_argument('-K', action='store_const', const='K', dest='unit', help='Display memory in KiB')
@@ -188,10 +279,19 @@ def main():
         sys.exit(1)
 
     # Default to per-process (-p) if no dump mode or meminfo is set
-    if not args.meminfo and not args.commands and not args.processes:
+    if not args.meminfo and not args.commands and not args.processes and not args.slab:
         args.processes = True
 
-    if args.commands or args.processes:
+    if args.slab:
+        events = parse_oom_log(args.log_file)
+        slab_usage = extract_slab_usage(events)
+        display_slab_usage(
+            slab_usage,
+            unit=args.unit,
+            pagesize_bytes=args.pagesize,
+        )
+
+    elif args.commands or args.processes:
         events = parse_oom_log(args.log_file)
         group_by = "command" if args.commands else "process"
         usage = extract_rss_and_swap_usage(events, group_by=group_by)
