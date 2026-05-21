@@ -399,47 +399,60 @@ def print_pcp_details(
     zone_w: int,
 ) -> None:
     pcp_zones = [z for z in zones if z.pcp_sets]
-    print(f"\nPCP cache details ({unit_label}; per-CPU pagesets):")
+    print(f"\nPCP cache summary ({unit_label}; summed across CPUs per zone):")
     if not pcp_zones:
         print("  No pageset details found.")
         return
 
     mem_keys = ("count", "high", "batch", "high_min", "high_max")
+    summaries: List[Tuple[ZoneRecord, int, Dict[str, Optional[int]], str]] = []
+    for z in pcp_zones:
+        sums: Dict[str, Optional[int]] = {}
+        for key in mem_keys:
+            vals = [pcp[key] for pcp in z.pcp_sets if key in pcp]
+            sums[key] = sum(vals) if vals else None
+
+        vmstats = sorted(
+            {pcp["vm_stats_threshold"] for pcp in z.pcp_sets if "vm_stats_threshold" in pcp}
+        )
+        if not vmstats:
+            vmstat_disp = "-"
+        elif len(vmstats) == 1:
+            vmstat_disp = f"{vmstats[0]:,}"
+        else:
+            vmstat_disp = f"{vmstats[0]:,}..{vmstats[-1]:,}"
+        summaries.append((z, len(z.pcp_sets), sums, vmstat_disp))
+
     mem_w = max(
         10,
         *(
-            len(pages_to_display(pcp.get(key), pagesize_bytes, unit))
-            for z in pcp_zones
-            for pcp in z.pcp_sets
+            len(pages_to_display(sums.get(key), pagesize_bytes, unit))
+            for _, _, sums, _ in summaries
             for key in mem_keys
         ),
     )
-    cpu_w = max(5, *(len(str(pcp.get("cpu", "-"))) for z in pcp_zones for pcp in z.pcp_sets))
-    vmstat_w = 8
+    cpu_w = max(5, *(len(str(cpu_count)) for _, cpu_count, _, _ in summaries))
+    vmstat_w = max(8, *(len(vmstat) for _, _, _, vmstat in summaries))
     hdr = (
         f"{'':>{node_col}} {'zone':<{zone_w}}"
-        f"{'cpu':>{cpu_w}}"
+        f"{'cpus':>{cpu_w}}"
         f"{'count':>{mem_w}}{'high':>{mem_w}}{'batch':>{mem_w}}"
         f"{'high_min':>{mem_w}}{'high_max':>{mem_w}}"
         f"{'vmstat':>{vmstat_w}}"
     )
     print(hdr)
     print("-" * len(hdr))
-    for z in pcp_zones:
-        for pcp in z.pcp_sets:
-            cpu = str(pcp.get("cpu", "-"))
-            vmstat = pcp.get("vm_stats_threshold")
-            vmstat_disp = f"{vmstat:,}" if vmstat is not None else "-"
-            print(
-                f"{('N' + str(z.node)):>{node_col}} {z.zone:<{zone_w}}"
-                f"{cpu:>{cpu_w}}"
-                f"{pages_to_display(pcp.get('count'), pagesize_bytes, unit):>{mem_w}}"
-                f"{pages_to_display(pcp.get('high'), pagesize_bytes, unit):>{mem_w}}"
-                f"{pages_to_display(pcp.get('batch'), pagesize_bytes, unit):>{mem_w}}"
-                f"{pages_to_display(pcp.get('high_min'), pagesize_bytes, unit):>{mem_w}}"
-                f"{pages_to_display(pcp.get('high_max'), pagesize_bytes, unit):>{mem_w}}"
-                f"{vmstat_disp:>{vmstat_w}}"
-            )
+    for z, cpu_count, sums, vmstat_disp in summaries:
+        print(
+            f"{('N' + str(z.node)):>{node_col}} {z.zone:<{zone_w}}"
+            f"{cpu_count:>{cpu_w}}"
+            f"{pages_to_display(sums.get('count'), pagesize_bytes, unit):>{mem_w}}"
+            f"{pages_to_display(sums.get('high'), pagesize_bytes, unit):>{mem_w}}"
+            f"{pages_to_display(sums.get('batch'), pagesize_bytes, unit):>{mem_w}}"
+            f"{pages_to_display(sums.get('high_min'), pagesize_bytes, unit):>{mem_w}}"
+            f"{pages_to_display(sums.get('high_max'), pagesize_bytes, unit):>{mem_w}}"
+            f"{vmstat_disp:>{vmstat_w}}"
+        )
 
 
 def print_zone_summary(
