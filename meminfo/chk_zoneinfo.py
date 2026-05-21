@@ -15,7 +15,8 @@ UNIT_LABELS = {"P": "pages", "K": "KiB", "M": "MiB", "G": "GiB"}
 
 NODE_ZONE_RE = re.compile(r"^Node\s+(\d+),\s*zone\s+(\S+)")
 NODE_PERNODE_RE = re.compile(r"^Node\s+(\d+),\s*per-node stats")
-PAGESET_COUNT_RE = re.compile(r"^count:\s*(\d+)\s*$", re.IGNORECASE)
+PAGESET_CPU_RE = re.compile(r"^cpu:\s*(\d+)\s*$", re.IGNORECASE)
+PAGESET_KV_RE = re.compile(r"^([A-Za-z0-9_ ]+):\s*(-?\d+)\s*$")
 
 
 def scale_value(kb: float, unit: str) -> float:
@@ -80,18 +81,18 @@ def parse_kv_line(line: str) -> Optional[Tuple[str, int]]:
     return key, val
 
 
-def _is_pageset_skip_line(stripped: str) -> bool:
-    """Lines inside pagesets that are not PCP page counts."""
-    return stripped.startswith(
-        ("cpu:", "high:", "batch:", "high_min:", "high_max:", "vm stats threshold:")
-    )
-
-
-def _parse_pageset_count(stripped: str) -> Optional[int]:
-    m = PAGESET_COUNT_RE.match(stripped)
+def _parse_pageset_cpu(stripped: str) -> Optional[int]:
+    m = PAGESET_CPU_RE.match(stripped)
     if m:
         return int(m.group(1))
     return None
+
+
+def _parse_pageset_kv(stripped: str) -> Optional[Tuple[str, int]]:
+    m = PAGESET_KV_RE.match(stripped)
+    if m is None:
+        return None
+    return m.group(1).strip().replace(" ", "_").lower(), int(m.group(2))
 
 
 @dataclass
@@ -100,6 +101,7 @@ class ZoneRecord:
     zone: str
     stats: Dict[str, int] = field(default_factory=dict)
     node_stats: Dict[str, int] = field(default_factory=dict)
+    pcp_sets: List[Dict[str, int]] = field(default_factory=list)
 
 
 def parse_zoneinfo(path: str) -> List[ZoneRecord]:
@@ -107,6 +109,7 @@ def parse_zoneinfo(path: str) -> List[ZoneRecord]:
     current: Optional[ZoneRecord] = None
     in_pagesets = False
     in_per_node_stats = False
+    current_pcp: Optional[Dict[str, int]] = None
 
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -119,6 +122,7 @@ def parse_zoneinfo(path: str) -> List[ZoneRecord]:
                     current = ZoneRecord(int(m_zone.group(1)), m_zone.group(2))
                     in_pagesets = False
                     in_per_node_stats = False
+                    current_pcp = None
                     continue
 
                 if NODE_PERNODE_RE.match(line):
@@ -127,6 +131,7 @@ def parse_zoneinfo(path: str) -> List[ZoneRecord]:
                         current = None
                     in_pagesets = False
                     in_per_node_stats = False
+                    current_pcp = None
                     continue
 
                 if current is None:
@@ -148,6 +153,7 @@ def parse_zoneinfo(path: str) -> List[ZoneRecord]:
 
                 if stripped == "pagesets":
                     in_pagesets = True
+                    current_pcp = None
                     continue
                 if in_pagesets:
                     if NODE_ZONE_RE.match(line) or NODE_PERNODE_RE.match(line):
@@ -163,19 +169,33 @@ def parse_zoneinfo(path: str) -> List[ZoneRecord]:
                                 zones.append(current)
                             current = None
                         in_per_node_stats = False
+                        current_pcp = None
                         continue
-                    pcp_n = _parse_pageset_count(stripped)
-                    if pcp_n is not None:
-                        current.stats["pcp_pages"] = (
-                            current.stats.get("pcp_pages", 0) + pcp_n
-                        )
+
+                    cpu_n = _parse_pageset_cpu(stripped)
+                    if cpu_n is not None:
+                        current_pcp = {"cpu": cpu_n}
+                        current.pcp_sets.append(current_pcp)
                         continue
-                    if _is_pageset_skip_line(stripped):
+
+                    pcp_kv = _parse_pageset_kv(stripped)
+                    if pcp_kv is not None:
+                        key, val = pcp_kv
+                        if current_pcp is None:
+                            current_pcp = {}
+                            current.pcp_sets.append(current_pcp)
+                        current_pcp[key] = val
+                        if key == "count":
+                            current.stats["pcp_pages"] = (
+                                current.stats.get("pcp_pages", 0) + val
+                            )
                         continue
+
                     kv_peek = parse_kv_line(line)
                     if kv_peek is None:
                         continue
                     in_pagesets = False
+                    current_pcp = None
 
                 kv = parse_kv_line(line)
                 if kv is None:
@@ -370,12 +390,65 @@ def resolve_zoneinfo_path(path: str) -> str:
     return os.path.join(path, "proc", "zoneinfo")
 
 
+def print_pcp_details(
+    zones: List[ZoneRecord],
+    unit: str,
+    unit_label: str,
+    pagesize_bytes: int,
+    node_col: int,
+    zone_w: int,
+) -> None:
+    pcp_zones = [z for z in zones if z.pcp_sets]
+    print(f"\nPCP cache details ({unit_label}; per-CPU pagesets):")
+    if not pcp_zones:
+        print("  No pageset details found.")
+        return
+
+    mem_keys = ("count", "high", "batch", "high_min", "high_max")
+    mem_w = max(
+        10,
+        *(
+            len(pages_to_display(pcp.get(key), pagesize_bytes, unit))
+            for z in pcp_zones
+            for pcp in z.pcp_sets
+            for key in mem_keys
+        ),
+    )
+    cpu_w = max(5, *(len(str(pcp.get("cpu", "-"))) for z in pcp_zones for pcp in z.pcp_sets))
+    vmstat_w = 8
+    hdr = (
+        f"{'':>{node_col}} {'zone':<{zone_w}}"
+        f"{'cpu':>{cpu_w}}"
+        f"{'count':>{mem_w}}{'high':>{mem_w}}{'batch':>{mem_w}}"
+        f"{'high_min':>{mem_w}}{'high_max':>{mem_w}}"
+        f"{'vmstat':>{vmstat_w}}"
+    )
+    print(hdr)
+    print("-" * len(hdr))
+    for z in pcp_zones:
+        for pcp in z.pcp_sets:
+            cpu = str(pcp.get("cpu", "-"))
+            vmstat = pcp.get("vm_stats_threshold")
+            vmstat_disp = f"{vmstat:,}" if vmstat is not None else "-"
+            print(
+                f"{('N' + str(z.node)):>{node_col}} {z.zone:<{zone_w}}"
+                f"{cpu:>{cpu_w}}"
+                f"{pages_to_display(pcp.get('count'), pagesize_bytes, unit):>{mem_w}}"
+                f"{pages_to_display(pcp.get('high'), pagesize_bytes, unit):>{mem_w}}"
+                f"{pages_to_display(pcp.get('batch'), pagesize_bytes, unit):>{mem_w}}"
+                f"{pages_to_display(pcp.get('high_min'), pagesize_bytes, unit):>{mem_w}}"
+                f"{pages_to_display(pcp.get('high_max'), pagesize_bytes, unit):>{mem_w}}"
+                f"{vmstat_disp:>{vmstat_w}}"
+            )
+
+
 def print_zone_summary(
     zoneinfo_path: str,
     unit: str,
     pagesize_bytes: int = DEFAULT_PAGE_SIZE_BYTES,
     use_color: bool = True,
     verbose: bool = False,
+    show_pcp: bool = False,
 ) -> None:
     unit_label = UNIT_LABELS[unit]
     zones = parse_zoneinfo(zoneinfo_path)
@@ -442,7 +515,7 @@ def print_zone_summary(
     else:
         print()
 
-    zone_w = max(len(z.zone) for z in zones) + 1
+    zone_w = max(len("zone"), *(len(z.zone) for z in zones)) + 1
     node_col = 4
     mem_w = max(
         12,
@@ -615,6 +688,9 @@ def print_zone_summary(
                 f"{pages_to_display(stat(z, 'low') or 0, pagesize_bytes, unit):>{wm_w}}"
                 f"{pages_to_display(stat(z, 'high') or 0, pagesize_bytes, unit):>{wm_w}}"
             )
+
+    if show_pcp:
+        print_pcp_details(zones, unit, unit_label, pagesize_bytes, node_col, zone_w)
     print()
 
 
@@ -651,6 +727,11 @@ def main() -> None:
         help="Show buddy/PCP/total free vs watermarks and TTY color legend",
     )
     parser.add_argument(
+        "--pcp",
+        action="store_true",
+        help="Show per-CPU pageset cache details",
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="Disable ANSI watermark highlights",
@@ -684,6 +765,7 @@ def main() -> None:
         pagesize_bytes=args.pagesize,
         use_color=use_color,
         verbose=args.verbose,
+        show_pcp=args.pcp,
     )
 
 
