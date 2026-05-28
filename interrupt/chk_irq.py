@@ -6,12 +6,16 @@ Like xsos -f INTERRUPTS: after each IRQ's smp_affinity_list, one character per
 CPU — '.' if that CPU's interrupt count is 0, '▊' if non-zero (same idea as xsos).
 
 Usage:
-    ./chk_irq.py [--path SOSROOT] [-c] [-H] [-n] [-v] [--width N]
+    ./chk_irq.py [--path SOSROOT] [-c] [-H] [-n] [-p] [-v] [--width N]
+                 [--irq N] [--desc KEYWORD]
 
     --path    Path to sosreport root or live / (default: current directory)
+    --irq     Show only IRQ(s) with this number (repeatable; matches irq column)
+    --desc    Show only rows whose description contains KEYWORD (case-insensitive)
     -c        Show smp_affinity_list (default: off; bar + description only)
     -H        Show affinity_hint (hex bitmask →CPU list like smp_affinity_list when needed)
     -n        Show IRQ NUMA node from proc/irq/<n>/node
+    -p        Show % of IRQ counts handled on CPUs outside smp_affinity_list
     -v        Print legend (CPU count, column sources, ▊/. meaning)
     --width   Max characters when truncating affinity / hint text (default: 256)
 
@@ -65,6 +69,35 @@ def parse_interrupts(root: str) -> tuple[list[str], list[tuple[str, list[int], s
         rows.append((irq_key, counts, desc))
 
     return cpus, rows
+
+
+def irq_matches(irq_key: str, irq_filter: str) -> bool:
+    """True if irq_key matches filter (exact or numeric IRQ number)."""
+    if irq_key == irq_filter:
+        return True
+    if irq_key.isdigit() and irq_filter.isdigit():
+        return int(irq_key) == int(irq_filter)
+    return False
+
+
+def filter_interrupt_rows(
+    rows: list[tuple[str, list[int], str]],
+    irq_filters: list[str] | None,
+    desc_keyword: str | None,
+) -> list[tuple[str, list[int], str]]:
+    """Keep rows matching all given filters (AND)."""
+    out = rows
+    if irq_filters:
+        wanted = {f.strip() for f in irq_filters if f.strip()}
+        out = [
+            row
+            for row in out
+            if any(irq_matches(row[0], filt) for filt in wanted)
+        ]
+    if desc_keyword:
+        needle = desc_keyword.casefold()
+        out = [row for row in out if needle in row[2].casefold()]
+    return out
 
 
 def compact_cpu_bar(counts: list[int], n_cpus: int, zero: str = ".", nonzero: str = "▊") -> str:
@@ -216,6 +249,30 @@ def parse_cpulist_like(s: str) -> set[int]:
     return out
 
 
+def off_affinity_irq_pct(counts: list[int], affinity_raw: str | None) -> float | None:
+    """
+    Percent of this IRQ's /proc/interrupts counts on CPUs not in smp_affinity_list.
+
+    Returns None when affinity is unknown or unparsable.
+    """
+    if affinity_raw is None:
+        return None
+    affinity = parse_cpulist_like(affinity_raw)
+    if not affinity:
+        return None
+    total = sum(counts)
+    if total == 0:
+        return 0.0
+    off = sum(c for i, c in enumerate(counts) if i not in affinity)
+    return 100.0 * off / total
+
+
+def format_off_affinity_pct(pct: float | None) -> str:
+    if pct is None:
+        return "-"
+    return f"{pct:5.1f}%"
+
+
 def parse_numactl_hardware_nodes(path: str) -> dict[int, set[int]]:
     """
     Parse `numactl --hardware` output:
@@ -354,6 +411,8 @@ def format_column_headers(
     show_numa: bool,
     numa_col_width: int,
     n_cpus: int,
+    show_off_affinity_pct: bool = False,
+    off_affinity_col_width: int = 1,
 ) -> str:
     """One header row aligned with format_irq_line / join(\" \")."""
     parts: list[str] = [f"{'IRQ':>{irq_width}}"]
@@ -363,6 +422,8 @@ def format_column_headers(
         parts.append(pad_header_cell("affinity", affinity_col_width))
     if show_numa:
         parts.append(pad_header_cell("node", numa_col_width))
+    if show_off_affinity_pct:
+        parts.append(pad_header_cell("off_aff%", off_affinity_col_width))
     # Same width as compact_cpu_bar() (one cell per CPU); dots as neutral ruler.
     parts.append(("." * n_cpus) if n_cpus else "")
     parts.append("description")
@@ -381,6 +442,8 @@ def format_irq_line(
     affinity_padded: str,
     show_numa: bool,
     numa_padded: str,
+    show_off_affinity_pct: bool = False,
+    off_affinity_padded: str = "",
 ) -> str:
     irq_label = f"{irq_key}:"
     bar = compact_cpu_bar(counts, n_cpus)
@@ -391,6 +454,8 @@ def format_irq_line(
         parts.append(affinity_padded)
     if show_numa:
         parts.append(numa_padded)
+    if show_off_affinity_pct:
+        parts.append(off_affinity_padded)
     parts.append(bar)
     parts.append(description)
     return " ".join(parts)
@@ -421,6 +486,11 @@ def main() -> None:
         help="Show IRQ NUMA node from proc/irq/<n>/node",
     )
     parser.add_argument(
+        "-p",
+        action="store_true",
+        help="Show %% of IRQ counts on CPUs outside smp_affinity_list (off_aff%%)",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -438,17 +508,36 @@ def main() -> None:
         metavar="N",
         help="Truncate smp_affinity_list to N chars if longer (default: 256)",
     )
+    parser.add_argument(
+        "--irq",
+        action="append",
+        metavar="N",
+        default=None,
+        help="Show only matching IRQ number (repeatable)",
+    )
+    parser.add_argument(
+        "--desc",
+        metavar="KEYWORD",
+        default=None,
+        help="Show only rows whose description contains KEYWORD (case-insensitive)",
+    )
     args = parser.parse_args()
     root = os.path.abspath(args.path)
     aff_max = max(4, args.width)
     show_affinity = args.c
     show_hint = args.H
     show_numa = args.n
+    show_off_affinity_pct = args.p
     use_color = sys.stdout.isatty() and not args.no_color
 
     cpus, rows = parse_interrupts(root)
     if not rows:
         print("No interrupt lines parsed.", file=sys.stderr)
+        sys.exit(1)
+
+    rows = filter_interrupt_rows(rows, args.irq, args.desc)
+    if not rows:
+        print("No interrupts match the given filters.", file=sys.stderr)
         sys.exit(1)
 
     irq_w = max(len(r[0]) + 1 for r in rows)  # "12:" etc.
@@ -488,6 +577,22 @@ def main() -> None:
     if show_numa:
         numa_col_w = max(numa_col_w, len("node"))
 
+    off_affinity_displays: list[str] = []
+    if show_off_affinity_pct:
+        for (irq_key, counts, _desc), aff_raw in zip(rows, affinity_raws):
+            if irq_key.isdigit():
+                pct = off_affinity_irq_pct(counts, aff_raw)
+            else:
+                pct = None
+            off_affinity_displays.append(format_off_affinity_pct(pct))
+    off_affinity_col_w = (
+        max(len(a) for a in off_affinity_displays)
+        if show_off_affinity_pct and off_affinity_displays
+        else 1
+    )
+    if show_off_affinity_pct:
+        off_affinity_col_w = max(off_affinity_col_w, len("off_aff%"))
+
     title = "INTERRUPTS (per-CPU ▊/.)"
     print(title)
     if args.verbose:
@@ -501,6 +606,17 @@ def main() -> None:
             legend_bits.append("affinity from proc/irq/<n>/smp_affinity_list")
         if show_numa:
             legend_bits.append("node from proc/irq/<n>/node (IRQ NUMA mapping)")
+        if show_off_affinity_pct:
+            legend_bits.append(
+                "off_aff% = share of counts on CPUs not in smp_affinity_list"
+            )
+        if args.irq or args.desc:
+            filt_bits: list[str] = []
+            if args.irq:
+                filt_bits.append(f"irq={','.join(args.irq)}")
+            if args.desc:
+                filt_bits.append(f"desc contains {args.desc!r}")
+            legend_bits.append("filters: " + "; ".join(filt_bits))
         legend_bits.append("▊ = non-zero count, . = zero")
         legend_bits.append(
             "highlight: affinity vs proc/irq/<n>/node CPUs "
@@ -519,22 +635,29 @@ def main() -> None:
             show_numa,
             numa_col_w,
             n_cpu,
+            show_off_affinity_pct,
+            off_affinity_col_w,
         )
     )
 
     numa_iter = numa_displays if show_numa else [""] * len(rows)
     hint_iter = hint_displays if show_hint else [""] * len(rows)
-    for (irq_key, counts, desc), aff_display, numa_raw, aff_raw, irq_node, hint_display in zip(
+    off_affinity_iter = (
+        off_affinity_displays if show_off_affinity_pct else [""] * len(rows)
+    )
+    for (irq_key, counts, desc), aff_display, numa_raw, aff_raw, irq_node, hint_display, off_aff_display in zip(
         rows,
         aff_displays,
         numa_iter,
         affinity_raws,
         irq_nodes,
         hint_iter,
+        off_affinity_iter,
     ):
         hint_padded = hint_display.ljust(hint_col_w)
         aff_padded = aff_display.ljust(affinity_col_w)
         numa_padded = numa_raw.ljust(numa_col_w)
+        off_aff_padded = off_aff_display.ljust(off_affinity_col_w)
         line = format_irq_line(
             irq_key,
             irq_w,
@@ -547,6 +670,8 @@ def main() -> None:
             aff_padded,
             show_numa,
             numa_padded,
+            show_off_affinity_pct,
+            off_aff_padded,
         )
         sev = numa_affinity_mismatch_severity(aff_raw, irq_node, node_cpu_map)
         line_out = highlight_line(f"    {line}", sev, use_color)
