@@ -270,7 +270,7 @@ def off_affinity_irq_pct(counts: list[int], affinity_raw: str | None) -> float |
 def format_off_affinity_pct(pct: float | None) -> str:
     if pct is None:
         return "-"
-    return f"{pct:5.1f}%"
+    return f"{pct:6.2f}%"
 
 
 def parse_numactl_hardware_nodes(path: str) -> dict[int, set[int]]:
