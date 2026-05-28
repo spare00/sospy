@@ -6,13 +6,15 @@ Like xsos -f INTERRUPTS: after each IRQ's smp_affinity_list, one character per
 CPU — '.' if that CPU's interrupt count is 0, '▊' if non-zero (same idea as xsos).
 
 Usage:
-    ./chk_irq.py [--path SOSROOT] [-c] [-H] [-n] [-p] [-v] [--width N]
+    ./chk_irq.py [--path SOSROOT] [-a|-c|-e|-H|-n|-p] [-v] [--width N]
                  [--irq N] [--desc KEYWORD]
 
     --path    Path to sosreport root or live / (default: current directory)
     --irq     Show only IRQ(s) with this number (repeatable; matches irq column)
     --desc    Show only rows whose description contains KEYWORD (case-insensitive)
+    -a        Show all optional columns (-c -e -H -n -p)
     -c        Show smp_affinity_list (default: off; bar + description only)
+    -e        Show effective_affinity_list (CPUs actually handling the IRQ)
     -H        Show affinity_hint (hex bitmask →CPU list like smp_affinity_list when needed)
     -n        Show IRQ NUMA node from proc/irq/<n>/node
     -p        Show % of IRQ counts handled on CPUs outside smp_affinity_list
@@ -115,6 +117,19 @@ def read_smp_affinity_list(root: str, irq_key: str) -> str | None:
     if not irq_key.isdigit():
         return None
     p = os.path.join(root, "proc", "irq", irq_key, "smp_affinity_list")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, encoding="utf-8", errors="replace") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def read_effective_affinity_list(root: str, irq_key: str) -> str | None:
+    if not irq_key.isdigit():
+        return None
+    p = os.path.join(root, "proc", "irq", irq_key, "effective_affinity_list")
     if not os.path.isfile(p):
         return None
     try:
@@ -404,10 +419,12 @@ def pad_header_cell(label: str, width: int) -> str:
 
 def format_column_headers(
     irq_width: int,
-    show_hint: bool,
-    hint_col_width: int,
     show_affinity: bool,
     affinity_col_width: int,
+    show_effective: bool,
+    effective_col_width: int,
+    show_hint: bool,
+    hint_col_width: int,
     show_numa: bool,
     numa_col_width: int,
     n_cpus: int,
@@ -416,10 +433,12 @@ def format_column_headers(
 ) -> str:
     """One header row aligned with format_irq_line / join(\" \")."""
     parts: list[str] = [f"{'IRQ':>{irq_width}}"]
-    if show_hint:
-        parts.append(pad_header_cell("affinity_hint", hint_col_width))
     if show_affinity:
         parts.append(pad_header_cell("affinity", affinity_col_width))
+    if show_effective:
+        parts.append(pad_header_cell("effective", effective_col_width))
+    if show_hint:
+        parts.append(pad_header_cell("affinity_hint", hint_col_width))
     if show_numa:
         parts.append(pad_header_cell("node", numa_col_width))
     if show_off_affinity_pct:
@@ -436,10 +455,12 @@ def format_irq_line(
     counts: list[int],
     n_cpus: int,
     description: str,
-    show_hint: bool,
-    hint_padded: str,
     show_affinity: bool,
     affinity_padded: str,
+    show_effective: bool,
+    effective_padded: str,
+    show_hint: bool,
+    hint_padded: str,
     show_numa: bool,
     numa_padded: str,
     show_off_affinity_pct: bool = False,
@@ -448,10 +469,12 @@ def format_irq_line(
     irq_label = f"{irq_key}:"
     bar = compact_cpu_bar(counts, n_cpus)
     parts: list[str] = [f"{irq_label:>{irq_width}}"]
-    if show_hint:
-        parts.append(hint_padded)
     if show_affinity:
         parts.append(affinity_padded)
+    if show_effective:
+        parts.append(effective_padded)
+    if show_hint:
+        parts.append(hint_padded)
     if show_numa:
         parts.append(numa_padded)
     if show_off_affinity_pct:
@@ -471,9 +494,19 @@ def main() -> None:
         help="Path to sosreport root or filesystem root (default: .)",
     )
     parser.add_argument(
+        "-a",
+        action="store_true",
+        help="Show all optional columns (-c -e -H -n -p)",
+    )
+    parser.add_argument(
         "-c",
         action="store_true",
         help="Show smp_affinity_list column (default: omit)",
+    )
+    parser.add_argument(
+        "-e",
+        action="store_true",
+        help="Show effective_affinity_list (CPUs actually handling the IRQ)",
     )
     parser.add_argument(
         "-H",
@@ -522,9 +555,12 @@ def main() -> None:
         help="Show only rows whose description contains KEYWORD (case-insensitive)",
     )
     args = parser.parse_args()
+    if args.a:
+        args.c = args.e = args.H = args.n = args.p = True
     root = os.path.abspath(args.path)
     aff_max = max(4, args.width)
     show_affinity = args.c
+    show_effective = args.e
     show_hint = args.H
     show_numa = args.n
     show_off_affinity_pct = args.p
@@ -548,6 +584,7 @@ def main() -> None:
 
     aff_displays: list[str] = []
     affinity_raws: list[str | None] = []
+    effective_displays: list[str] = []
     hint_displays: list[str] = []
     irq_nodes: list[int | None] = []
     for irq_key, _counts, _desc in rows:
@@ -555,6 +592,8 @@ def main() -> None:
         affinity_raws.append(aff)
         raw = aff if aff is not None else "-"
         aff_displays.append(truncate_affinity(raw, aff_max))
+        eff = read_effective_affinity_list(root, irq_key)
+        effective_displays.append(truncate_affinity(eff if eff is not None else "-", aff_max))
         hint = read_affinity_hint(root, irq_key)
         hint_raw = hint if hint is not None else "-"
         hint_display = format_affinity_hint_for_display(hint_raw)
@@ -563,6 +602,9 @@ def main() -> None:
     affinity_col_w = max(len(a) for a in aff_displays) if aff_displays else 1
     if show_affinity:
         affinity_col_w = max(affinity_col_w, len("affinity"))
+    effective_col_w = max(len(a) for a in effective_displays) if effective_displays else 1
+    if show_effective:
+        effective_col_w = max(effective_col_w, len("effective"))
     hint_col_w = max(len(h) for h in hint_displays) if hint_displays else 1
     if show_hint:
         hint_col_w = max(hint_col_w, len("affinity_hint"))
@@ -597,13 +639,17 @@ def main() -> None:
     print(title)
     if args.verbose:
         legend_bits = [f"{n_cpu} CPUs"]
+        if show_affinity:
+            legend_bits.append("affinity from proc/irq/<n>/smp_affinity_list")
+        if show_effective:
+            legend_bits.append(
+                "effective from proc/irq/<n>/effective_affinity_list"
+            )
         if show_hint:
             legend_bits.append(
                 "affinity_hint from proc/irq/<n>/affinity_hint "
                 "(comma-separated hex words → smp_affinity_list-style CPUs)"
             )
-        if show_affinity:
-            legend_bits.append("affinity from proc/irq/<n>/smp_affinity_list")
         if show_numa:
             legend_bits.append("node from proc/irq/<n>/node (IRQ NUMA mapping)")
         if show_off_affinity_pct:
@@ -628,10 +674,12 @@ def main() -> None:
         "    "
         + format_column_headers(
             irq_w,
-            show_hint,
-            hint_col_w,
             show_affinity,
             affinity_col_w,
+            show_effective,
+            effective_col_w,
+            show_hint,
+            hint_col_w,
             show_numa,
             numa_col_w,
             n_cpu,
@@ -640,22 +688,25 @@ def main() -> None:
         )
     )
 
+    effective_iter = effective_displays if show_effective else [""] * len(rows)
     numa_iter = numa_displays if show_numa else [""] * len(rows)
     hint_iter = hint_displays if show_hint else [""] * len(rows)
     off_affinity_iter = (
         off_affinity_displays if show_off_affinity_pct else [""] * len(rows)
     )
-    for (irq_key, counts, desc), aff_display, numa_raw, aff_raw, irq_node, hint_display, off_aff_display in zip(
+    for (irq_key, counts, desc), aff_display, eff_display, numa_raw, aff_raw, irq_node, hint_display, off_aff_display in zip(
         rows,
         aff_displays,
+        effective_iter,
         numa_iter,
         affinity_raws,
         irq_nodes,
         hint_iter,
         off_affinity_iter,
     ):
-        hint_padded = hint_display.ljust(hint_col_w)
         aff_padded = aff_display.ljust(affinity_col_w)
+        eff_padded = eff_display.ljust(effective_col_w)
+        hint_padded = hint_display.ljust(hint_col_w)
         numa_padded = numa_raw.ljust(numa_col_w)
         off_aff_padded = off_aff_display.ljust(off_affinity_col_w)
         line = format_irq_line(
@@ -664,10 +715,12 @@ def main() -> None:
             counts,
             n_cpu,
             desc,
-            show_hint,
-            hint_padded,
             show_affinity,
             aff_padded,
+            show_effective,
+            eff_padded,
+            show_hint,
+            hint_padded,
             show_numa,
             numa_padded,
             show_off_affinity_pct,
