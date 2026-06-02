@@ -6,18 +6,18 @@ Like xsos -f INTERRUPTS: after each IRQ's smp_affinity_list, one character per
 CPU — '.' if that CPU's interrupt count is 0, '▊' if non-zero (same idea as xsos).
 
 Usage:
-    ./chk_irq.py [--path SOSROOT] [-a|-c|-e|-H|-n|-p] [-v] [--width N]
+    ./chk_irq.py [--path SOSROOT] [--all|-s|-e|-H|-n] [--off-rate] [-v] [--width N]
                  [--irq N] [--desc KEYWORD]
 
     --path    Path to sosreport root or live / (default: current directory)
     --irq     Show only IRQ(s) with this number (repeatable; matches irq column)
     --desc    Show only rows whose description contains KEYWORD (case-insensitive)
-    -a        Show all optional columns (-c -e -H -n -p)
-    -c        Show smp_affinity_list (default: off; bar + description only)
+    --all     Show all optional columns (-s -e -H -n --off-rate)
+    -s        Show smp_affinity_list (default: off; bar + description only)
     -e        Show effective_affinity_list (CPUs actually handling the IRQ)
     -H        Show affinity_hint (hex bitmask →CPU list like smp_affinity_list when needed)
     -n        Show IRQ NUMA node from proc/irq/<n>/node
-    -p        Show % of IRQ counts handled on CPUs outside smp_affinity_list
+    --off-rate  Show share of counts on CPUs outside smp_affinity_list (off_aff% column)
     -v        Print legend (CPU count, column sources, ▊/. meaning)
     --width   Max characters when truncating affinity / hint text (default: 256)
 
@@ -288,6 +288,10 @@ def format_off_affinity_pct(pct: float | None) -> str:
     return f"{pct:6.2f}"
 
 
+def irq_total_count(counts: list[int]) -> int:
+    return sum(counts)
+
+
 def parse_numactl_hardware_nodes(path: str) -> dict[int, set[int]]:
     """
     Parse `numactl --hardware` output:
@@ -430,6 +434,7 @@ def format_column_headers(
     n_cpus: int,
     show_off_affinity_pct: bool = False,
     off_affinity_col_width: int = 1,
+    total_col_width: int = 1,
 ) -> str:
     """One header row aligned with format_irq_line / join(\" \")."""
     parts: list[str] = [f"{'IRQ':>{irq_width}}"]
@@ -443,6 +448,7 @@ def format_column_headers(
         parts.append(pad_header_cell("node", numa_col_width))
     if show_off_affinity_pct:
         parts.append(pad_header_cell("off_aff%", off_affinity_col_width))
+    parts.append(f"{'total':>{total_col_width}}")
     # Same width as compact_cpu_bar() (one cell per CPU); dots as neutral ruler.
     parts.append(("." * n_cpus) if n_cpus else "")
     parts.append("description")
@@ -465,6 +471,7 @@ def format_irq_line(
     numa_padded: str,
     show_off_affinity_pct: bool = False,
     off_affinity_padded: str = "",
+    total_padded: str = "",
 ) -> str:
     irq_label = f"{irq_key}:"
     bar = compact_cpu_bar(counts, n_cpus)
@@ -479,6 +486,7 @@ def format_irq_line(
         parts.append(numa_padded)
     if show_off_affinity_pct:
         parts.append(off_affinity_padded)
+    parts.append(total_padded)
     parts.append(bar)
     parts.append(description)
     return " ".join(parts)
@@ -494,12 +502,12 @@ def main() -> None:
         help="Path to sosreport root or filesystem root (default: .)",
     )
     parser.add_argument(
-        "-a",
+        "--all",
         action="store_true",
-        help="Show all optional columns (-c -e -H -n -p)",
+        help="Show all optional columns (-s -e -H -n --off-rate)",
     )
     parser.add_argument(
-        "-c",
+        "-s",
         action="store_true",
         help="Show smp_affinity_list column (default: omit)",
     )
@@ -519,9 +527,9 @@ def main() -> None:
         help="Show IRQ NUMA node from proc/irq/<n>/node",
     )
     parser.add_argument(
-        "-p",
+        "--off-rate",
         action="store_true",
-        help="Show %% of IRQ counts on CPUs outside smp_affinity_list (off_aff%%)",
+        help="Show share of IRQ counts on CPUs outside smp_affinity_list (off_aff%%)",
     )
     parser.add_argument(
         "-v",
@@ -555,15 +563,15 @@ def main() -> None:
         help="Show only rows whose description contains KEYWORD (case-insensitive)",
     )
     args = parser.parse_args()
-    if args.a:
-        args.c = args.e = args.H = args.n = args.p = True
+    if args.all:
+        args.s = args.e = args.H = args.n = args.off_rate = True
     root = os.path.abspath(args.path)
     aff_max = max(4, args.width)
-    show_affinity = args.c
+    show_affinity = args.s
     show_effective = args.e
     show_hint = args.H
     show_numa = args.n
-    show_off_affinity_pct = args.p
+    show_off_affinity_pct = args.off_rate
     use_color = sys.stdout.isatty() and not args.no_color
 
     cpus, rows = parse_interrupts(root)
@@ -635,6 +643,10 @@ def main() -> None:
     if show_off_affinity_pct:
         off_affinity_col_w = max(off_affinity_col_w, len("off_aff%"))
 
+    total_displays = [str(irq_total_count(counts)) for _irq, counts, _desc in rows]
+    total_col_w = max(len(t) for t in total_displays) if total_displays else 1
+    total_col_w = max(total_col_w, len("total"))
+
     title = "INTERRUPTS (per-CPU ▊/.)"
     print(title)
     if args.verbose:
@@ -656,6 +668,7 @@ def main() -> None:
             legend_bits.append(
                 "off_aff% = share of counts on CPUs not in smp_affinity_list"
             )
+        legend_bits.append("total = sum of per-CPU interrupt counts for the IRQ")
         if args.irq or args.desc:
             filt_bits: list[str] = []
             if args.irq:
@@ -685,6 +698,7 @@ def main() -> None:
             n_cpu,
             show_off_affinity_pct,
             off_affinity_col_w,
+            total_col_w,
         )
     )
 
@@ -694,7 +708,7 @@ def main() -> None:
     off_affinity_iter = (
         off_affinity_displays if show_off_affinity_pct else [""] * len(rows)
     )
-    for (irq_key, counts, desc), aff_display, eff_display, numa_raw, aff_raw, irq_node, hint_display, off_aff_display in zip(
+    for (irq_key, counts, desc), aff_display, eff_display, numa_raw, aff_raw, irq_node, hint_display, off_aff_display, total_display in zip(
         rows,
         aff_displays,
         effective_iter,
@@ -703,12 +717,14 @@ def main() -> None:
         irq_nodes,
         hint_iter,
         off_affinity_iter,
+        total_displays,
     ):
         aff_padded = aff_display.ljust(affinity_col_w)
         eff_padded = eff_display.ljust(effective_col_w)
         hint_padded = hint_display.ljust(hint_col_w)
         numa_padded = numa_raw.ljust(numa_col_w)
         off_aff_padded = off_aff_display.ljust(off_affinity_col_w)
+        total_padded = total_display.rjust(total_col_w)
         line = format_irq_line(
             irq_key,
             irq_w,
@@ -725,6 +741,7 @@ def main() -> None:
             numa_padded,
             show_off_affinity_pct,
             off_aff_padded,
+            total_padded,
         )
         sev = numa_affinity_mismatch_severity(aff_raw, irq_node, node_cpu_map)
         line_out = highlight_line(f"    {line}", sev, use_color)
