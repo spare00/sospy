@@ -44,7 +44,7 @@ def normalize_tokens(line):
 
 def get_sar_file_from_date():
     try:
-        with open("date", "r") as f:
+        with open("date", "r", encoding="utf-8", errors="replace") as f:
             date_line = f.readline().strip()
         result = subprocess.run(
             ["~/git/sospy/date/extract_date.py"],
@@ -294,7 +294,7 @@ def process_segment(lines, tail_lines=None, debug=False, memory_only=False):
 
 def parse_sar_sections(filepath, tail_lines=None, debug=False, verbose=False, memory_only=False):
     try:
-        with open(filepath, "r") as f:
+        with open(filepath, "r", encoding="utf-8", errors="replace") as f:
             raw_lines = f.readlines()
     except FileNotFoundError:
         print(f"SAR file not found: {filepath}", file=sys.stderr)
