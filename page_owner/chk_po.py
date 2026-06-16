@@ -835,9 +835,8 @@ def main():
     parser.add_argument("--sample-offset", type=int, default=0,
                         help="With --sample-every N, keep allocations where index %% N == offset (default: 0)")
 
-    # NEW: progress options
-    parser.add_argument("--progress", action="store_true", help="Show parsing progress to stderr")
-    parser.add_argument("--progress-interval", type=float, default=0.5, help="Seconds between progress updates (default: 0.5)")
+    parser.add_argument("--progress-interval", type=float, default=0.5,
+                        help="Seconds between parse progress updates on stderr (default: 0.5)")
 
     args = parser.parse_args()
     if args.N < 1:
@@ -914,10 +913,8 @@ def main():
         if args.verbose:
             kind_msg = f"Detected dump kind: {dump_kind}" if dump_kind != 'unknown' else "Dump kind: unknown"
             print(f"Analyzing {args.file} (totals only). {kind_msg}")
-        prog = None
-        if args.progress:
-            total_bytes = _regular_file_size(args.file)
-            prog = Progress("Totals-only parse", total_bytes=total_bytes, interval=args.progress_interval)
+        total_bytes = _regular_file_size(args.file)
+        prog = Progress("Totals-only parse", total_bytes=total_bytes, interval=args.progress_interval)
         order_stats = parse_totals_only(
             args.file,
             progress=prog,
@@ -934,10 +931,8 @@ def main():
         kind_msg = f"Detected dump kind: {dump_kind}" if dump_kind != 'unknown' else "Dump kind: unknown"
         print(f"Analyzing {args.file} with unit {unit}{' (strict mode)' if args.strict else ''}. {kind_msg}")
 
-    prog = None
-    if args.progress:
-        total_bytes = _regular_file_size(args.file)
-        prog = Progress("Full parse", total_bytes=total_bytes, interval=args.progress_interval)
+    total_bytes = _regular_file_size(args.file)
+    prog = Progress("Full parse", total_bytes=total_bytes, interval=args.progress_interval)
 
     (process_data, module_data, slab_data, calltrace_data, calltrace_index,
      process_module_pages, total_allocs, skipped_allocations,
