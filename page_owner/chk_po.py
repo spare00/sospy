@@ -531,7 +531,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                         progress.update(pos)
 
             elif in_trace and not line:
-                # blank line ends current allocation block
+                # blank line ends allocation block
                 finalize_current()
                 if progress:
                     pos = _file_progress_pos(f)
@@ -575,7 +575,26 @@ def convert_pages(pages, unit):
 def _unit_short(unit):
     return {'K': 'K', 'M': 'M', 'G': 'G'}.get(unit, 'kB')
 
-def show_top(data, label, unit, key='pages', top_n=10):
+def _sort_rank_rows(rows, sort_by, default_col, top_n):
+    """Sort rows by 1-based column index and return top_n. Column 1 is the name field."""
+    if not rows:
+        return []
+    ncols = len(rows[0])
+    col = sort_by if sort_by is not None else default_col
+    if col < 1 or col > ncols:
+        raise ValueError(f"sort-by must be 1..{ncols} for this report")
+    key_idx = col - 1
+
+    def sort_key(row):
+        val = row[key_idx]
+        if isinstance(val, str):
+            return val.lower()
+        return val
+
+    rows = sorted(rows, key=sort_key, reverse=True)
+    return rows[:top_n]
+
+def show_top(data, label, unit, key='pages', top_n=10, sort_by=None):
     unit_short = _unit_short(unit)
     if label == "Modules":
         print(f"{'Module':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
@@ -585,7 +604,13 @@ def show_top(data, label, unit, key='pages', top_n=10):
         print(f"{'Application':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
         print("=" * 50)
 
-    sorted_items = sorted(data.items(), key=lambda x: x[1][key], reverse=True)[:top_n]
+    if label == "Modules":
+        sorted_items = sorted(data.items(), key=lambda x: x[1][key], reverse=True)[:top_n]
+    else:
+        proc_rows = [(name, stats['allocs'], stats['pages']) for name, stats in data.items()]
+        sorted_rows = _sort_rank_rows(proc_rows, sort_by, default_col=3, top_n=top_n)
+        sorted_items = [(name, {'allocs': allocs, 'pages': pages}) for name, allocs, pages in sorted_rows]
+
     total_pages = 0
     total_allocs = 0
     for name, stats in sorted_items:
@@ -632,7 +657,7 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
         print("\n".join(calltrace_index[key]))
         print("-" * 50)
 
-def show_processes_for_module(process_module_pages, module_name, unit, top_n=10):
+def show_processes_for_module(process_module_pages, module_name, unit, top_n=10, sort_by=None):
     aggregated = defaultdict(lambda: {'pages': 0, 'allocs': 0})
     for (proc, mod), stats in process_module_pages.items():
         if mod == module_name:
@@ -646,20 +671,21 @@ def show_processes_for_module(process_module_pages, module_name, unit, top_n=10)
     print(f"Top {top_n} Processes using module '{module_name}':")
     print(f"{'Application':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
     print("=" * 50)
-    sorted_items = sorted(aggregated.items(), key=lambda x: x[1]['pages'], reverse=True)[:top_n]
+    proc_rows = [(proc, stats['allocs'], stats['pages']) for proc, stats in aggregated.items()]
+    sorted_rows = _sort_rank_rows(proc_rows, sort_by, default_col=3, top_n=top_n)
     total_pages = 0
     total_allocs = 0
-    for proc, stats in sorted_items:
-        mem, unit_label = convert_pages(stats['pages'], unit)
-        total_pages += stats['pages']
-        total_allocs += stats['allocs']
-        print(f"{proc:<25}{stats['allocs']:>15}{mem:>15.2f} {unit_label}")
+    for proc, allocs, pages in sorted_rows:
+        mem, unit_label = convert_pages(pages, unit)
+        total_pages += pages
+        total_allocs += allocs
+        print(f"{proc:<25}{allocs:>15}{mem:>15.2f} {unit_label}")
     total_mem, unit_label = convert_pages(total_pages, unit)
     print("-" * 50)
     print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {unit_label}")
     print("=" * 50)
 
-def show_modules_breakdown(process_data, process_module_pages, unit, top_n=10):
+def show_modules_breakdown(process_data, process_module_pages, unit, top_n=10, sort_by=None):
     """-p -m: show per-process module vs non-module memory usage."""
     unit_short = _unit_short(unit)
     proc_rows = []
@@ -679,9 +705,8 @@ def show_modules_breakdown(process_data, process_module_pages, unit, top_n=10):
         total_mod_pages += mod_pages
         total_non_pages += non_pages
 
-    # Sort by total usage, take top_n
-    proc_rows.sort(key=lambda x: x[3], reverse=True)
-    top_rows = proc_rows[:top_n]
+    # Sort and take top_n (default: column 4 = Total)
+    top_rows = _sort_rank_rows(proc_rows, sort_by, default_col=4, top_n=top_n)
 
     # Print
     print(f"Top {top_n} Processes:")
@@ -755,7 +780,7 @@ def show_slab_by_process(proc_slab_stats, unit, top_n=10):
     print("-" * 50)
     print(f"{'Total':<20}{total_allocs:>15}{total_mem:>15.2f} {unit_label}")
 
-def show_slab_breakdown(proc_slab_stats, unit, top_n=10):
+def show_slab_breakdown(proc_slab_stats, unit, top_n=10, sort_by=None):
     """-s -p (Type-2 only): slab vs non-slab per process, top N by total."""
     unit_short = _unit_short(unit)
     # Build rows
@@ -770,9 +795,8 @@ def show_slab_breakdown(proc_slab_stats, unit, top_n=10):
         total_slab_pages += st['slab_pages']
         total_non_pages += st['non_slab_pages']
 
-    # Sort by total desc and take top_n
-    rows.sort(key=lambda x: x[3], reverse=True)
-    top_rows = rows[:top_n]
+    # Sort and take top_n (default: column 4 = Total)
+    top_rows = _sort_rank_rows(rows, sort_by, default_col=4, top_n=top_n)
 
     # Print header exactly as expected
     print(f"Top {top_n} Processes:")
@@ -795,6 +819,8 @@ def main():
     parser.add_argument("-K", dest="unit", action="store_const", const='K', help="Show in KB")
     parser.add_argument("-G", dest="unit", action="store_const", const='G', help="Show in GB")
     parser.add_argument("-p", "--processes", action="store_true", help="Process report (varies by mode)")
+    parser.add_argument("--sort-by", type=int, metavar="COL",
+                        help="With -p: sort by column number (1=Application, last column=default)")
     parser.add_argument("-m", "--modules", action="store_true", help="Show top memory-using modules")
     parser.add_argument("-s", "--slabs", action="store_true", help="Show slab usage by process (Type-2 only). With -p, show slab vs non-slab breakdown")
     parser.add_argument("-c", "--calltraces", action="store_true", help="Show top call trace patterns (see -N)")
@@ -833,6 +859,19 @@ def main():
     if args.filter_module and not args.processes:
         print("Error: '--filter-module' requires '-p' or '--processes' to be specified.")
         return
+
+    if args.sort_by is not None and not args.processes:
+        parser.error("--sort-by requires -p")
+
+    if args.sort_by is not None and args.processes:
+        if args.slabs:
+            max_col = 4
+        elif args.modules:
+            max_col = 4
+        else:
+            max_col = 3
+        if args.sort_by < 1 or args.sort_by > max_col:
+            parser.error(f"--sort-by must be 1..{max_col} for this process report")
 
     # Fast pre-scan to detect dump kind to gate -p and -s (both require Type-2)
     dump_kind = quick_detect_dump_kind(args.file, max_lines=args.detect_lines)
@@ -930,20 +969,20 @@ def main():
             if not has_process_metadata:
                 print("Slab view (-s): Requires Type-2 dump with process metadata.")
             else:
-                show_slab_breakdown(proc_slab_stats, unit, top_n=args.N)
+                show_slab_breakdown(proc_slab_stats, unit, top_n=args.N, sort_by=args.sort_by)
         elif args.modules:
             # -p -m: modules vs non-modules per process
             if not has_process_metadata:
                 print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-            show_modules_breakdown(process_data, process_module_pages, unit, top_n=args.N)
+            show_modules_breakdown(process_data, process_module_pages, unit, top_n=args.N, sort_by=args.sort_by)
         else:
             # plain -p
             if args.filter_module:
-                show_processes_for_module(process_module_pages, args.filter_module, unit, top_n=args.N)
+                show_processes_for_module(process_module_pages, args.filter_module, unit, top_n=args.N, sort_by=args.sort_by)
             else:
                 if not has_process_metadata:
                     print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-                show_top(process_data, "Processes", unit, top_n=args.N)
+                show_top(process_data, "Processes", unit, top_n=args.N, sort_by=args.sort_by)
 
     # Call traces
     if args.calltraces:
