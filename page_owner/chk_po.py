@@ -199,7 +199,7 @@ def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
 
 def parse_page_owner(filename, debug=False, strict=False, progress=None,
                      collect_calltraces=False, slab_only_calltraces=False,
-                     slab_only_modules=False, sample_every=1, sample_offset=0):
+                     slab_only_scope=False, sample_every=1, sample_offset=0):
     """
     Parse page_owner text file.
 
@@ -211,8 +211,8 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
       When False, skip hashing/indexing for speed and memory.
     - slab_only_calltraces: with collect_calltraces, keep only allocations
       whose PFN Flags include 'slab'.
-    - slab_only_modules: keep only slab-flagged allocations in module and
-      process/order totals used by -m and -p -m reports.
+    - slab_only_scope: with -p or -m, keep only slab-flagged allocations in
+      process, module, and slab-vs-non-slab totals.
 
     Returns (in this exact order):
       process_data, module_data, slab_data, calltrace_data, calltrace_index,
@@ -295,10 +295,10 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
         pages = base_pages * w
         process_name = current_allocation.get('process', 'Unknown')
         is_slab_flags = current_allocation.get('flags_slab', False)
-        skip_module_scope = slab_only_modules and not is_slab_flags
+        skip_slab_scope = slab_only_scope and not is_slab_flags
 
         # Process totals
-        if not skip_module_scope:
+        if not skip_slab_scope:
             process_data[process_name]['allocs'] += w
             process_data[process_name]['pages']  += pages
 
@@ -320,7 +320,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
         is_slab_alloc = any(SLAB_ALLOCATOR_FUNC_RE.search(func) for func, _ in frames)
 
         # Per-process slab/non-slab (meaningful with type2 process names)
-        if process_name != 'Unknown':
+        if process_name != 'Unknown' and not skip_slab_scope:
             if is_slab_alloc:
                 proc_slab_stats[process_name]['slab_pages']  += pages
                 proc_slab_stats[process_name]['slab_allocs'] += w
@@ -365,7 +365,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                 slab_data[func]['pages']  += pages
 
         # Apply module attribution
-        if attributed_module and not skip_module_scope:
+        if attributed_module and not skip_slab_scope:
             module_data[attributed_module]['allocs'] += w
             module_data[attributed_module]['pages']  += pages
             process_module_pages[(process_name, attributed_module)]['pages']  += pages
@@ -390,7 +390,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                     "weight": w
                 })
 
-        if not skip_module_scope:
+        if not skip_slab_scope:
             total_allocs += w
         in_trace = False
         current_allocation = {}
@@ -624,7 +624,10 @@ def show_top(data, label, unit, key='pages', top_n=10, sort_by=None, slab_only=F
         print(f"{'Module':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
         print("=" * 55)
     else:
-        print(f"Top {top_n} {label}:")
+        title = f"Top {top_n} {label}"
+        if slab_only:
+            title += " (slab only)"
+        print(f"{title}:")
         print(f"{'Application':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
         print("=" * 50)
 
@@ -655,18 +658,17 @@ def show_top(data, label, unit, key='pages', top_n=10, sort_by=None, slab_only=F
         print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {total_unit}")
         print("=" * 50)
 
-def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_process=None, process_to_traces=None, allocations=None, slab_only=False):
+def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_process=None, allocations=None, slab_only=False):
     title = f"Top {top_n} Call Traces"
     if slab_only:
         title += " (slab only)"
     print(f"{title}:")
     print("=" * 50)
 
-    if filter_by_process and process_to_traces and allocations:
+    if filter_by_process:
         filtered_stats = defaultdict(lambda: {'count': 0, 'pages': 0})
-        allowed_keys = process_to_traces.get(filter_by_process, set())
-        for alloc in allocations:
-            if alloc['process'] == filter_by_process and alloc['trace_key'] in allowed_keys:
+        for alloc in allocations or ():
+            if alloc['process'] == filter_by_process:
                 w = alloc.get('weight', 1)
                 filtered_stats[alloc['trace_key']]['count'] += w
                 filtered_stats[alloc['trace_key']]['pages'] += alloc['pages']
@@ -675,7 +677,10 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
 
     if not filtered_stats:
         if filter_by_process:
-            print(f"No call traces found for process '{filter_by_process}'")
+            if slab_only:
+                print(f"No slab call traces found for process '{filter_by_process}'")
+            else:
+                print(f"No call traces found for process '{filter_by_process}'")
         elif slab_only:
             print("No slab call traces found")
         else:
@@ -689,7 +694,7 @@ def show_calltraces(calltrace_data, calltrace_index, unit, top_n=5, filter_by_pr
         print("\n".join(calltrace_index[key]))
         print("-" * 50)
 
-def show_processes_for_module(process_module_pages, module_name, unit, top_n=10, sort_by=None):
+def show_processes_for_module(process_module_pages, module_name, unit, top_n=10, sort_by=None, slab_only=False):
     aggregated = defaultdict(lambda: {'pages': 0, 'allocs': 0})
     for (proc, mod), stats in process_module_pages.items():
         if mod == module_name:
@@ -700,7 +705,10 @@ def show_processes_for_module(process_module_pages, module_name, unit, top_n=10,
         return
 
     unit_short = _unit_short(unit)
-    print(f"Top {top_n} Processes using module '{module_name}':")
+    title = f"Top {top_n} Processes using module '{module_name}'"
+    if slab_only:
+        title += " (slab only)"
+    print(f"{title}:")
     print(f"{'Application':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
     print("=" * 50)
     proc_rows = [(proc, stats['allocs'], stats['pages']) for proc, stats in aggregated.items()]
@@ -788,7 +796,7 @@ def show_totals_verbose(order_stats, unit):
     print(f"Total Allocations: {total_allocs}")
     print(f"Total Memory ({unit_label}): {total_mem:.2f}")
 
-def show_slab_by_process(proc_slab_stats, unit, top_n=10):
+def show_slab_by_process(proc_slab_stats, unit, top_n=10, slab_only=False):
     """-s (Type-2 only): slab-only usage per process, top N by slab memory."""
     unit_short = _unit_short(unit)
     rows = [(proc, stats) for proc, stats in proc_slab_stats.items() if stats['slab_pages'] > 0]
@@ -799,7 +807,10 @@ def show_slab_by_process(proc_slab_stats, unit, top_n=10):
     total_pages = sum(st['slab_pages'] for _, st in rows)
 
     # Header
-    print(f"Top {top_n} Processes:")
+    title = f"Top {top_n} Processes"
+    if slab_only:
+        title += " (slab only)"
+    print(f"{title}:")
     print(f"{'Application':<20}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
     print("=" * 50)
 
@@ -813,7 +824,7 @@ def show_slab_by_process(proc_slab_stats, unit, top_n=10):
     print("-" * 50)
     print(f"{'Total':<20}{total_allocs:>15}{total_mem:>15.2f} {unit_label}")
 
-def show_slab_breakdown(proc_slab_stats, unit, top_n=10, sort_by=None):
+def show_slab_breakdown(proc_slab_stats, unit, top_n=10, sort_by=None, slab_only=False):
     """-s -p (Type-2 only): slab vs non-slab per process, top N by total."""
     unit_short = _unit_short(unit)
     # Build rows
@@ -832,7 +843,10 @@ def show_slab_breakdown(proc_slab_stats, unit, top_n=10, sort_by=None):
     top_rows = _sort_rank_rows(rows, sort_by, default_col=4, top_n=top_n)
 
     # Print header exactly as expected
-    print(f"Top {top_n} Processes:")
+    title = f"Top {top_n} Processes"
+    if slab_only:
+        title += " (slab only)"
+    print(f"{title}:")
     print(f"{'Application':<20}{'Slabs (' + unit_short + ')':>18}{'Non Slabs (' + unit_short + ')':>20}{'Total (' + unit_short + ')':>16}")
     print("=" * 80)
     for proc, slab_mem, non_mem, total_mem in top_rows:
@@ -858,7 +872,7 @@ def main():
     parser.add_argument("-s", "--slabs", action="store_true", help="Show slab usage by process (Type-2 only). With -p, show slab vs non-slab breakdown")
     parser.add_argument("-c", "--calltraces", action="store_true", help="Show top call trace patterns (see -N)")
     parser.add_argument("--slab-only", action="store_true",
-                        help="With -c or -m: include only allocations whose PFN Flags list includes slab")
+                        help="With -c, -m, or -p: include only allocations whose PFN Flags list includes slab")
     parser.add_argument("-N", type=int, default=10, metavar="N",
                         help="Number of top entries to show in ranked reports (default: 10)")
     parser.add_argument("-t", "--total", action="store_true", help="Show only total allocations/memory (with -v, also per-order breakdown)")
@@ -890,8 +904,8 @@ def main():
         print("Error: '--calltrace-process' requires '-c' or '--calltraces' to be specified.")
         return
 
-    if args.slab_only and not (args.calltraces or args.modules):
-        print("Error: '--slab-only' requires '-c' or '-m'.")
+    if args.slab_only and not (args.calltraces or args.modules or args.processes):
+        print("Error: '--slab-only' requires '-c', '-m', or '-p'.")
         return
 
     if args.filter_module and not args.processes:
@@ -976,7 +990,7 @@ def main():
     prog = Progress("Full parse", total_bytes=total_bytes, interval=args.progress_interval)
 
     slab_only_calltraces = args.slab_only and args.calltraces
-    slab_only_modules = args.slab_only and args.modules
+    slab_only_scope = args.slab_only and (args.processes or args.modules)
 
     (process_data, module_data, slab_data, calltrace_data, calltrace_index,
      process_module_pages, total_allocs, skipped_allocations,
@@ -985,21 +999,21 @@ def main():
         args.file, args.debug, strict=args.strict, progress=prog,
         collect_calltraces=args.calltraces,
         slab_only_calltraces=slab_only_calltraces,
-        slab_only_modules=slab_only_modules,
+        slab_only_scope=slab_only_scope,
         sample_every=args.sample_every,
         sample_offset=args.sample_offset,
     )
 
     # --- Modules report (only when -m is used without -p or -s)
     if args.modules and not args.processes and not args.slabs:
-        show_top(module_data, "Modules", unit, top_n=args.N, slab_only=slab_only_modules)
+        show_top(module_data, "Modules", unit, top_n=args.N, slab_only=slab_only_scope)
 
     # Slabs report (Type-2 only behavior)
     if args.slabs and not args.processes:
         if not has_process_metadata:
             print("Slab view (-s): Requires Type-2 dump with process metadata.")
         else:
-            show_slab_by_process(proc_slab_stats, unit, top_n=args.N)
+            show_slab_by_process(proc_slab_stats, unit, top_n=args.N, slab_only=slab_only_scope)
 
     # --- Processes report
     if args.processes:
@@ -1008,31 +1022,26 @@ def main():
             if not has_process_metadata:
                 print("Slab view (-s): Requires Type-2 dump with process metadata.")
             else:
-                show_slab_breakdown(proc_slab_stats, unit, top_n=args.N, sort_by=args.sort_by)
+                show_slab_breakdown(proc_slab_stats, unit, top_n=args.N, sort_by=args.sort_by, slab_only=slab_only_scope)
         elif args.modules:
             # -p -m: modules vs non-modules per process
             if not has_process_metadata:
                 print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-            show_modules_breakdown(process_data, process_module_pages, unit, top_n=args.N, sort_by=args.sort_by, slab_only=slab_only_modules)
+            show_modules_breakdown(process_data, process_module_pages, unit, top_n=args.N, sort_by=args.sort_by, slab_only=slab_only_scope)
         else:
             # plain -p
             if args.filter_module:
-                show_processes_for_module(process_module_pages, args.filter_module, unit, top_n=args.N, sort_by=args.sort_by)
+                show_processes_for_module(process_module_pages, args.filter_module, unit, top_n=args.N, sort_by=args.sort_by, slab_only=slab_only_scope)
             else:
                 if not has_process_metadata:
                     print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-                show_top(process_data, "Processes", unit, top_n=args.N, sort_by=args.sort_by)
+                show_top(process_data, "Processes", unit, top_n=args.N, sort_by=args.sort_by, slab_only=slab_only_scope)
 
     # Call traces
     if args.calltraces:
-        process_to_traces = defaultdict(set)
-        for alloc in allocations:
-            if not args.calltrace_process or alloc['process'] == args.calltrace_process:
-                process_to_traces[alloc['process']].add(alloc['trace_key'])
         show_calltraces(
             calltrace_data, calltrace_index, unit, top_n=args.N,
             filter_by_process=args.calltrace_process,
-            process_to_traces=process_to_traces,
             allocations=allocations,
             slab_only=slab_only_calltraces,
         )
