@@ -154,14 +154,15 @@ def quick_detect_dump_kind(path, max_lines=5000):
         return 'unknown'
     return 'type1' if saw_any else 'unknown'
 
-def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
+def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0, slab_only=False):
     """
-    Super-fast path for -t only: just count allocations and pages per order.
-    Ignores stacks entirely.
+    Super-fast path for -t/-o only: count allocations and pages per order.
+    When slab_only, reads PFN Flags and keeps only slab-flagged allocations.
     """
     order_stats = defaultdict(lambda: {'allocs': 0, 'pages': 0})
     alloc_idx = 0
     last_pos = 0
+    pending_order = None
 
     # bigger buffer helps for huge files
     with open(path, 'r', encoding='utf-8', errors='replace', buffering=1024*1024) as f:
@@ -170,6 +171,7 @@ def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
             line = raw.rstrip('\n')
             m = ALLOC_HEADER_ORDER_RE.match(line)
             if m:
+                pending_order = None
                 # systematic sampling: keep every N-th allocation
                 take = (alloc_idx % sample_every == sample_offset)
                 alloc_idx += 1
@@ -184,10 +186,20 @@ def parse_totals_only(path, progress=None, sample_every=1, sample_offset=0):
                     order = int(m.group(1))
                 except ValueError:
                     continue
-                w = sample_every  # scale up to estimate full dataset
-                pages = (1 << order) * w
-                order_stats[order]['allocs'] += w
-                order_stats[order]['pages'] += pages
+                if slab_only:
+                    pending_order = order
+                else:
+                    w = sample_every  # scale up to estimate full dataset
+                    pages = (1 << order) * w
+                    order_stats[order]['allocs'] += w
+                    order_stats[order]['pages'] += pages
+            elif slab_only and pending_order is not None and line.startswith('PFN'):
+                if _pfn_flags_has_slab(line):
+                    w = sample_every
+                    pages = (1 << pending_order) * w
+                    order_stats[pending_order]['allocs'] += w
+                    order_stats[pending_order]['pages'] += pages
+                pending_order = None
             if progress:
                 pos = _file_progress_pos(f)
                 if pos is not None:
@@ -211,8 +223,8 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
       When False, skip hashing/indexing for speed and memory.
     - slab_only_calltraces: with collect_calltraces, keep only allocations
       whose PFN Flags include 'slab'.
-    - slab_only_scope: with -p or -m, keep only slab-flagged allocations in
-      process, module, and slab-vs-non-slab totals.
+    - slab_only_scope: with -p, -m, -t, or -o, keep only slab-flagged allocations in
+      process, module, and per-order totals.
 
     Returns (in this exact order):
       process_data, module_data, slab_data, calltrace_data, calltrace_index,
@@ -769,18 +781,20 @@ def show_skipped(skipped_allocations, verbose=False):
     for reason, count in skipped_allocations.items():
         print(f" - {reason.replace('_', ' ').capitalize()}: {count}")
 
-def show_totals(order_stats, unit):
+def show_totals(order_stats, unit, slab_only=False):
     total_allocs = sum(v['allocs'] for v in order_stats.values())
     total_pages = sum(v['pages'] for v in order_stats.values())
     total_mem, unit_label = convert_pages(total_pages, unit)
-    print("Summary:")
+    title = "Summary (slab only):" if slab_only else "Summary:"
+    print(title)
     print("====================")
     print(f"Total Allocations: {total_allocs}")
     print(f"Total Memory ({unit_label}): {total_mem:.2f}")
 
-def show_totals_verbose(order_stats, unit):
+def show_totals_per_order(order_stats, unit, slab_only=False):
     unit_short = _unit_short(unit)
-    print("Summary:")
+    title = "Summary (slab only):" if slab_only else "Summary:"
+    print(title)
     print("====================")
     print(f"{'Order':<13}{'Allocations':>15}{'Memory (' + unit_short + ')':>16}")
     print("========================================")
@@ -860,7 +874,9 @@ def show_slab_breakdown(proc_slab_stats, unit, top_n=10, sort_by=None, slab_only
 def main():
     parser = argparse.ArgumentParser(description="Analyze large page_owner file.")
     parser.add_argument("file", help="Path to the page_owner file")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose status output (analysis info, skipped allocations)")
+    parser.add_argument("-o", "--per-order", action="store_true",
+                        help="Show per-order allocation and memory breakdown (with -t or by default)")
     parser.add_argument("-d", "--debug", action="store_true", help="Debug output")
     parser.add_argument("-M", dest="unit", action="store_const", const='M', help="Show in MB")
     parser.add_argument("-K", dest="unit", action="store_const", const='K', help="Show in KB")
@@ -872,10 +888,10 @@ def main():
     parser.add_argument("-s", "--slabs", action="store_true", help="Show slab usage by process (Type-2 only). With -p, show slab vs non-slab breakdown")
     parser.add_argument("-c", "--calltraces", action="store_true", help="Show top call trace patterns (see -N)")
     parser.add_argument("--slab-only", action="store_true",
-                        help="With -c, -m, or -p: include only allocations whose PFN Flags list includes slab")
+                        help="With -c, -m, -p, -t, or -o: include only allocations whose PFN Flags list includes slab")
     parser.add_argument("-N", type=int, default=10, metavar="N",
                         help="Number of top entries to show in ranked reports (default: 10)")
-    parser.add_argument("-t", "--total", action="store_true", help="Show only total allocations/memory (with -v, also per-order breakdown)")
+    parser.add_argument("-t", "--total", action="store_true", help="Show total allocations/memory summary")
     parser.add_argument("--calltrace-process", type=str, help="Show call traces only for this process")
     parser.add_argument("--filter-module", type=str, help="Show top processes using this module")
     parser.add_argument("--strict", action="store_true", help="Attribute only when a module-tagged frame at/under the first allocator looks allocation-like (e.g., vx_alloc, getblk, new_*)")
@@ -904,8 +920,9 @@ def main():
         print("Error: '--calltrace-process' requires '-c' or '--calltraces' to be specified.")
         return
 
-    if args.slab_only and not (args.calltraces or args.modules or args.processes):
-        print("Error: '--slab-only' requires '-c', '-m', or '-p'.")
+    if args.slab_only and not (args.calltraces or args.modules or args.processes
+                               or args.per_order or args.total):
+        print("Error: '--slab-only' requires '-c', '-m', '-p', '-t', or '-o'.")
         return
 
     if args.filter_module and not args.processes:
@@ -975,11 +992,12 @@ def main():
             progress=prog,
             sample_every=args.sample_every,
             sample_offset=args.sample_offset,
+            slab_only=args.slab_only,
         )
-        if args.verbose:
-            show_totals_verbose(order_stats, unit)
+        if args.per_order:
+            show_totals_per_order(order_stats, unit, slab_only=args.slab_only)
         else:
-            show_totals(order_stats, unit)
+            show_totals(order_stats, unit, slab_only=args.slab_only)
         return
 
     if args.verbose:
@@ -990,7 +1008,9 @@ def main():
     prog = Progress("Full parse", total_bytes=total_bytes, interval=args.progress_interval)
 
     slab_only_calltraces = args.slab_only and args.calltraces
-    slab_only_scope = args.slab_only and (args.processes or args.modules)
+    slab_only_scope = args.slab_only and (
+        args.processes or args.modules or args.per_order or args.total
+    )
 
     (process_data, module_data, slab_data, calltrace_data, calltrace_index,
      process_module_pages, total_allocs, skipped_allocations,
@@ -1045,6 +1065,9 @@ def main():
             allocations=allocations,
             slab_only=slab_only_calltraces,
         )
+
+    if args.per_order:
+        show_totals_per_order(order_stats, unit, slab_only=args.slab_only)
 
     show_skipped(skipped_allocations, args.verbose)
 
