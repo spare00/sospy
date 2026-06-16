@@ -31,18 +31,6 @@ ALLOCATOR_FUNC_RE = re.compile(
     re.IGNORECASE
 )
 
-# Subset: slab allocator functions (used to classify slab vs non-slab)
-SLAB_ALLOCATOR_FUNC_RE = re.compile(
-    r'\b('
-    r'kmem_cache_(?:alloc|zalloc)(?:_node)?|'
-    r'k(?:m|vz|vm)alloc(?:_node)?|kzalloc(?:_node)?|kmalloc(?:_node)?|'
-    r'kmalloc_array|kcalloc|'
-    r'__kmalloc(?:_node|_track_caller)?|'
-    r'(?:__)?slab_alloc|___slab_alloc|allocate_slab'
-    r')\b',
-    re.IGNORECASE
-)
-
 # Module-local function names that look like an allocation by that module.
 # Lookarounds so underscores count as boundaries (Python \b treats '_' as word char).
 MODULE_ALLOC_LIKE_RE = re.compile(
@@ -123,11 +111,15 @@ def _file_progress_pos(f):
         return None
 
 def _pfn_flags_has_slab(line):
-    """Return True when PFN Flags list includes the slab page flag."""
-    m = re.search(r'Flags\s+0x[0-9A-Fa-f]+\(([^)]+)\)', line)
+    """Return True when PFN Flags list includes the slab page flag.
+
+    Both type-1 and type-2 page_owner dumps include a PFN line with Flags;
+    e.g. Flags 0xfffffc0008100(slab|head) or (slab|head|node=0|zone=1|...).
+    """
+    m = re.search(r'Flags\s+0x[0-9A-Fa-f]+\(([^)]*)\)', line)
     if not m:
         return False
-    return 'slab' in (tok.strip() for tok in m.group(1).split('|'))
+    return 'slab' in (tok.strip() for tok in m.group(1).split('|') if tok.strip())
 
 # -------------------------
 # Core functions
@@ -328,12 +320,9 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                 alloc_idx = i
                 break
 
-        # Slab classification: treat as slab if any slab allocator appears
-        is_slab_alloc = any(SLAB_ALLOCATOR_FUNC_RE.search(func) for func, _ in frames)
-
-        # Per-process slab/non-slab (meaningful with type2 process names)
+        # Per-process slab/non-slab from PFN Flags (type-1 and type-2)
         if process_name != 'Unknown' and not skip_slab_scope:
-            if is_slab_alloc:
+            if is_slab_flags:
                 proc_slab_stats[process_name]['slab_pages']  += pages
                 proc_slab_stats[process_name]['slab_allocs'] += w
             else:
@@ -480,6 +469,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                         'ts': ts,
                         'sampled': True,
                         'weight': sample_every,
+                        'flags_slab': False,
                     }
                     has_process_metadata = True
                     in_trace = True
@@ -530,6 +520,7 @@ def parse_page_owner(filename, debug=False, strict=False, progress=None,
                         'ts': -1,
                         'sampled': True,
                         'weight': sample_every,
+                        'flags_slab': False,
                     }
                     in_trace = True
                     current_calltrace = []
@@ -882,7 +873,8 @@ def main():
     parser.add_argument("--sort-by", type=int, metavar="COL",
                         help="With -p: sort by column number (1=Application, last column=default)")
     parser.add_argument("-m", "--modules", action="store_true", help="Show top memory-using modules")
-    parser.add_argument("-s", "--slabs", action="store_true", help="Show slab usage by process (Type-2 only). With -p, show slab vs non-slab breakdown")
+    parser.add_argument("-s", "--slabs", action="store_true",
+                        help="Show slab usage by process via PFN slab flag (Type-2 only). With -p, show slab vs non-slab breakdown")
     parser.add_argument("-c", "--calltraces", action="store_true", help="Show top call trace patterns (see -N)")
     parser.add_argument("--slab-only", action="store_true",
                         help="With -c, -m, -p, -t, or -o: include only allocations whose PFN Flags list includes slab")
