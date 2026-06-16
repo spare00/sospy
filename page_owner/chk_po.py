@@ -782,33 +782,30 @@ def show_skipped(skipped_allocations, verbose=False):
         print(f" - {reason.replace('_', ' ').capitalize()}: {count}")
 
 def show_totals(order_stats, unit, slab_only=False):
+    unit_short = _unit_short(unit)
     total_allocs = sum(v['allocs'] for v in order_stats.values())
     total_pages = sum(v['pages'] for v in order_stats.values())
-    total_mem, unit_label = convert_pages(total_pages, unit)
-    title = "Summary (slab only):" if slab_only else "Summary:"
-    print(title)
-    print("====================")
-    print(f"Total Allocations: {total_allocs}")
-    print(f"Total Memory ({unit_label}): {total_mem:.2f}")
+    total_mem, total_unit = convert_pages(total_pages, unit)
+    label = "Summary (slab only)" if slab_only else "Summary"
+    print(f"{label:<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
+    print("=" * 55)
+    print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {total_unit}")
 
 def show_totals_per_order(order_stats, unit, slab_only=False):
     unit_short = _unit_short(unit)
-    title = "Summary (slab only):" if slab_only else "Summary:"
-    print(title)
-    print("====================")
-    print(f"{'Order':<13}{'Allocations':>15}{'Memory (' + unit_short + ')':>16}")
-    print("========================================")
+    label = "Order (slab only)" if slab_only else "Order"
+    print(f"{label:<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
+    print("=" * 55)
     for order in sorted(order_stats.keys()):
         allocs = order_stats[order]['allocs']
         pages = order_stats[order]['pages']
-        mem, unit_label = convert_pages(pages, unit)
-        print(f"{order:<13}{allocs:>15}{mem:>14.2f} {unit_label}")
-    print("====================")
+        mem, _ = convert_pages(pages, unit)
+        print(f"{order:<25}{allocs:>15}{mem:>15.2f}")
+    print("=" * 55)
     total_allocs = sum(v['allocs'] for v in order_stats.values())
     total_pages = sum(v['pages'] for v in order_stats.values())
-    total_mem, unit_label = convert_pages(total_pages, unit)
-    print(f"Total Allocations: {total_allocs}")
-    print(f"Total Memory ({unit_label}): {total_mem:.2f}")
+    total_mem, total_unit = convert_pages(total_pages, unit)
+    print(f"{'Total':<25}{total_allocs:>15}{total_mem:>15.2f} {total_unit}")
 
 def show_slab_by_process(proc_slab_stats, unit, top_n=10, slab_only=False):
     """-s (Type-2 only): slab-only usage per process, top N by slab memory."""
