@@ -582,6 +582,7 @@ def show_top(data, label, unit, key='pages', top_n=10):
         print("=" * 55)
     else:
         print(f"Top {top_n} {label}:")
+        print(f"{'Application':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
         print("=" * 50)
 
     sorted_items = sorted(data.items(), key=lambda x: x[1][key], reverse=True)[:top_n]
@@ -641,7 +642,9 @@ def show_processes_for_module(process_module_pages, module_name, unit, top_n=10)
         print(f"No allocations found for module '{module_name}'.")
         return
 
+    unit_short = _unit_short(unit)
     print(f"Top {top_n} Processes using module '{module_name}':")
+    print(f"{'Application':<25}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
     print("=" * 50)
     sorted_items = sorted(aggregated.items(), key=lambda x: x[1]['pages'], reverse=True)[:top_n]
     total_pages = 0
