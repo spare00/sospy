@@ -606,17 +606,17 @@ def show_top(data, label, unit, key='pages', top_n=10, sort_by=None):
 
     if label == "Modules":
         sorted_items = sorted(data.items(), key=lambda x: x[1][key], reverse=True)[:top_n]
+        total_pages = sum(stats[key] for stats in data.values())
+        total_allocs = sum(stats['allocs'] for stats in data.values())
     else:
         proc_rows = [(name, stats['allocs'], stats['pages']) for name, stats in data.items()]
         sorted_rows = _sort_rank_rows(proc_rows, sort_by, default_col=3, top_n=top_n)
         sorted_items = [(name, {'allocs': allocs, 'pages': pages}) for name, allocs, pages in sorted_rows]
+        total_pages = sum(stats['pages'] for stats in data.values())
+        total_allocs = sum(stats['allocs'] for stats in data.values())
 
-    total_pages = 0
-    total_allocs = 0
     for name, stats in sorted_items:
         mem, unit_label = convert_pages(stats['pages'], unit)
-        total_pages += stats['pages']
-        total_allocs += stats['allocs']
         if label == "Modules":
             print(f"{name:<25}{stats['allocs']:>15}{mem:>15.2f}")
         else:
@@ -673,12 +673,10 @@ def show_processes_for_module(process_module_pages, module_name, unit, top_n=10,
     print("=" * 50)
     proc_rows = [(proc, stats['allocs'], stats['pages']) for proc, stats in aggregated.items()]
     sorted_rows = _sort_rank_rows(proc_rows, sort_by, default_col=3, top_n=top_n)
-    total_pages = 0
-    total_allocs = 0
+    total_pages = sum(stats['pages'] for stats in aggregated.values())
+    total_allocs = sum(stats['allocs'] for stats in aggregated.values())
     for proc, allocs, pages in sorted_rows:
         mem, unit_label = convert_pages(pages, unit)
-        total_pages += pages
-        total_allocs += allocs
         print(f"{proc:<25}{allocs:>15}{mem:>15.2f} {unit_label}")
     total_mem, unit_label = convert_pages(total_pages, unit)
     print("-" * 50)
