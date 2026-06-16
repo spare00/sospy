@@ -684,10 +684,9 @@ def show_modules_breakdown(process_data, process_module_pages, unit, top_n=10):
     top_rows = proc_rows[:top_n]
 
     # Print
-    print("Top 10 Processes:")
-    print("=" * 50)
+    print(f"Top {top_n} Processes:")
     print(f"{'Application':<20}{'Modules (' + unit_short + ')':>18}{'Non Modules (' + unit_short + ')':>20}{'Total (' + unit_short + ')':>16}")
-    print("-" * 80)
+    print("=" * 80)
     for proc, mod_mem, non_mem, tot_mem in top_rows:
         print(f"{proc:<20}{mod_mem:>18.2f}{non_mem:>20.2f}{tot_mem:>16.2f}")
     print("-" * 80)
@@ -742,10 +741,9 @@ def show_slab_by_process(proc_slab_stats, unit, top_n=10):
     total_pages = sum(st['slab_pages'] for _, st in rows)
 
     # Header
-    print("Top 10 Processes:")
-    print("=" * 50)
+    print(f"Top {top_n} Processes:")
     print(f"{'Application':<20}{'Allocations':>15}{'Memory (' + unit_short + ')':>15}")
-    print("-" * 50)
+    print("=" * 50)
 
     # Top N only
     for proc, st in rows[:top_n]:
@@ -777,10 +775,9 @@ def show_slab_breakdown(proc_slab_stats, unit, top_n=10):
     top_rows = rows[:top_n]
 
     # Print header exactly as expected
-    print("Top 10 Processes:")
-    print("=" * 50)
+    print(f"Top {top_n} Processes:")
     print(f"{'Application':<20}{'Slabs (' + unit_short + ')':>18}{'Non Slabs (' + unit_short + ')':>20}{'Total (' + unit_short + ')':>16}")
-    print("-" * 80)
+    print("=" * 80)
     for proc, slab_mem, non_mem, total_mem in top_rows:
         print(f"{proc:<20}{slab_mem:>18.2f}{non_mem:>20.2f}{total_mem:>16.2f}")
     print("-" * 80)
@@ -800,7 +797,9 @@ def main():
     parser.add_argument("-p", "--processes", action="store_true", help="Process report (varies by mode)")
     parser.add_argument("-m", "--modules", action="store_true", help="Show top memory-using modules")
     parser.add_argument("-s", "--slabs", action="store_true", help="Show slab usage by process (Type-2 only). With -p, show slab vs non-slab breakdown")
-    parser.add_argument("-c", "--calltraces", action="store_true", help="Show top 5 call trace patterns")
+    parser.add_argument("-c", "--calltraces", action="store_true", help="Show top call trace patterns (see -N)")
+    parser.add_argument("-N", type=int, default=10, metavar="N",
+                        help="Number of top entries to show in ranked reports (default: 10)")
     parser.add_argument("-t", "--total", action="store_true", help="Show only total allocations/memory (with -v, also per-order breakdown)")
     parser.add_argument("--calltrace-process", type=str, help="Show call traces only for this process")
     parser.add_argument("--filter-module", type=str, help="Show top processes using this module")
@@ -817,6 +816,8 @@ def main():
     parser.add_argument("--progress-interval", type=float, default=0.5, help="Seconds between progress updates (default: 0.5)")
 
     args = parser.parse_args()
+    if args.N < 1:
+        parser.error("-N must be >= 1")
     unit = args.unit or 'G'
 
     # Default to totals if no report option is set
@@ -913,14 +914,14 @@ def main():
 
     # --- Modules report (only when -m is used without -p or -s)
     if args.modules and not args.processes and not args.slabs:
-        show_top(module_data, "Modules", unit)
+        show_top(module_data, "Modules", unit, top_n=args.N)
 
     # Slabs report (Type-2 only behavior)
     if args.slabs and not args.processes:
         if not has_process_metadata:
             print("Slab view (-s): Requires Type-2 dump with process metadata.")
         else:
-            show_slab_by_process(proc_slab_stats, unit, top_n=10)
+            show_slab_by_process(proc_slab_stats, unit, top_n=args.N)
 
     # --- Processes report
     if args.processes:
@@ -929,20 +930,20 @@ def main():
             if not has_process_metadata:
                 print("Slab view (-s): Requires Type-2 dump with process metadata.")
             else:
-                show_slab_breakdown(proc_slab_stats, unit, top_n=10)
+                show_slab_breakdown(proc_slab_stats, unit, top_n=args.N)
         elif args.modules:
             # -p -m: modules vs non-modules per process
             if not has_process_metadata:
                 print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-            show_modules_breakdown(process_data, process_module_pages, unit, top_n=10)
+            show_modules_breakdown(process_data, process_module_pages, unit, top_n=args.N)
         else:
             # plain -p
             if args.filter_module:
-                show_processes_for_module(process_module_pages, args.filter_module, unit)
+                show_processes_for_module(process_module_pages, args.filter_module, unit, top_n=args.N)
             else:
                 if not has_process_metadata:
                     print("Process metadata (pid/tgid/comm) not present in this dump; 'Unknown' will be shown as process.")
-                show_top(process_data, "Processes", unit)
+                show_top(process_data, "Processes", unit, top_n=args.N)
 
     # Call traces
     if args.calltraces:
@@ -951,7 +952,7 @@ def main():
             if not args.calltrace_process or alloc['process'] == args.calltrace_process:
                 process_to_traces[alloc['process']].add(alloc['trace_key'])
         show_calltraces(
-            calltrace_data, calltrace_index, unit,
+            calltrace_data, calltrace_index, unit, top_n=args.N,
             filter_by_process=args.calltrace_process,
             process_to_traces=process_to_traces,
             allocations=allocations
