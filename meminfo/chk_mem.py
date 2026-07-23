@@ -416,7 +416,12 @@ def print_simple(meminfo, unit):
 
     # no tmpfs/sysv breakdown in this mode
     anon_shared_kb = max((active_anon + inactive_anon) - meminfo.get("AnonPages", 0), 0)
-    anon_extra_text = f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
+    anon_huge_kb = meminfo.get("AnonHugePages", 0)
+    # show() wraps once in (...); close/reopen so we get (diff=...)(THP: ...)
+    anon_extra_text = (
+        f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label})"
+        f"(THP: {scale_value(anon_huge_kb, unit):.2f} {unit_label}"
+    )
 
     huge_total_kb = get_hugepages_reserved_kb(meminfo)
     huge_used_kb = get_hugepages_used_kb(meminfo)
@@ -474,8 +479,13 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
     anonpages = meminfo.get("AnonPages", 0)
     anon_diff = (active_anon + inactive_anon) - anonpages
     anon_shared_kb = anon_diff if anon_diff > 0 else 0
+    anon_huge_kb = meminfo.get("AnonHugePages", 0)
 
-    anon_extra_text = f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
+    # show() wraps once in (...); close/reopen so we get (diff=...)(THP: ...)
+    anon_extra_text = (
+        f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label})"
+        f"(THP: {scale_value(anon_huge_kb, unit):.2f} {unit_label}"
+    )
 
     print(f"{'Field':<30} {'Size (' + unit_label + ')':>10}")
     print("=" * 42)
