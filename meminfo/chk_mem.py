@@ -400,7 +400,7 @@ def calculate_unaccounted(meminfo):
 
     return total, accounted_sum, total - accounted_sum, fields
 
-def print_simple(meminfo, unit):
+def print_simple(meminfo, unit, verbose=False):
     """Simplified version for a standalone /proc/meminfo file"""
     unit_label = {"K": "KiB", "M": "MiB", "G": "GiB"}[unit]
     def show(label, value, extra=None):
@@ -417,11 +417,15 @@ def print_simple(meminfo, unit):
     # no tmpfs/sysv breakdown in this mode
     anon_shared_kb = max((active_anon + inactive_anon) - meminfo.get("AnonPages", 0), 0)
     anon_huge_kb = meminfo.get("AnonHugePages", 0)
-    # show() wraps once in (...); close/reopen so we get (diff=...)(THP: ...)
-    anon_extra_text = (
-        f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label})"
-        f"(THP: {scale_value(anon_huge_kb, unit):.2f} {unit_label}"
-    )
+    if verbose:
+        # AnonHugePages is shown as its own indented field; keep only the anon diff note
+        anon_extra_text = f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
+    else:
+        # show() wraps once in (...); close/reopen so we get (diff=...)(THP: ...)
+        anon_extra_text = (
+            f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label})"
+            f"(THP: {scale_value(anon_huge_kb, unit):.2f} {unit_label}"
+        )
 
     huge_total_kb = get_hugepages_reserved_kb(meminfo)
     huge_used_kb = get_hugepages_used_kb(meminfo)
@@ -442,7 +446,12 @@ def print_simple(meminfo, unit):
     show("AnonPages", meminfo.get("AnonPages", 0), anon_extra_text)
     show("  Active(anon)", active_anon)
     show("  Inactive(anon)", inactive_anon)
+    if verbose:
+        show("  AnonHugePages", anon_huge_kb)
     show("Slab", meminfo.get("Slab", 0))
+    if verbose:
+        show("  SReclaimable", meminfo.get("SReclaimable", 0))
+        show("  SUnreclaim", meminfo.get("SUnreclaim", 0))
     show("KernelStack", meminfo.get("KernelStack", 0))
     show("PageTables", meminfo.get("PageTables", 0))
     show("Percpu", meminfo.get("Percpu", 0))
@@ -481,11 +490,15 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
     anon_shared_kb = anon_diff if anon_diff > 0 else 0
     anon_huge_kb = meminfo.get("AnonHugePages", 0)
 
-    # show() wraps once in (...); close/reopen so we get (diff=...)(THP: ...)
-    anon_extra_text = (
-        f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label})"
-        f"(THP: {scale_value(anon_huge_kb, unit):.2f} {unit_label}"
-    )
+    if verbose:
+        # AnonHugePages is shown as its own indented field; keep only the anon diff note
+        anon_extra_text = f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label}"
+    else:
+        # show() wraps once in (...); close/reopen so we get (diff=...)(THP: ...)
+        anon_extra_text = (
+            f"diff={scale_value(anon_shared_kb, unit):.2f} {unit_label})"
+            f"(THP: {scale_value(anon_huge_kb, unit):.2f} {unit_label}"
+        )
 
     print(f"{'Field':<30} {'Size (' + unit_label + ')':>10}")
     print("=" * 42)
@@ -504,7 +517,12 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
     show("AnonPages", meminfo.get("AnonPages", 0), anon_extra_text)
     show("  Active(anon)", active_anon)
     show("  Inactive(anon)", inactive_anon)
+    if verbose:
+        show("  AnonHugePages", anon_huge_kb)
     show("Slab", meminfo.get("Slab", 0))
+    if verbose:
+        show("  SReclaimable", meminfo.get("SReclaimable", 0))
+        show("  SUnreclaim", meminfo.get("SUnreclaim", 0))
     show("KernelStack", meminfo.get("KernelStack", 0))
     show("PageTables", meminfo.get("PageTables", 0))
     show("Percpu", meminfo.get("Percpu", 0))
@@ -729,7 +747,8 @@ def main():
         "-v",
         "--verbose",
         action="store_true",
-        help="Show formula for unaccounted memory (-i); TTY color legend for buddy (-b)",
+        help="Show extra meminfo breakdown (SReclaimable, SUnreclaim, AnonHugePages) "
+             "and unaccounted formula (-i); TTY color legend for buddy (-b)",
     )
     parser.add_argument(
         "--no-color",
@@ -782,13 +801,13 @@ def main():
         # If -i was given an explicit file, use it directly
         if isinstance(args.i, str):
             meminfo = parse_meminfo(args.i)
-            print_simple(meminfo, unit)
+            print_simple(meminfo, unit, args.verbose)
             return
 
         # Detect meminfo-only mode (bare meminfo file passed as positional)
         if os.path.isfile(path) and os.path.basename(path) == "meminfo":
             meminfo = parse_meminfo(path)
-            print_simple(meminfo, unit)
+            print_simple(meminfo, unit, args.verbose)
             return
 
         sosroot = path
