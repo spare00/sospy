@@ -7,6 +7,7 @@ import argparse
 from typing import List, Optional, Tuple
 
 DEFAULT_PAGE_SIZE_BYTES = 4096
+DEFAULT_TOP_N = 10
 
 
 def scale_value(kb, unit):
@@ -560,7 +561,7 @@ def print_detailed(meminfo, tmpfs_used, sysv_rss_kb, unit, verbose=False):
 
     show("Unaccounted:", unaccounted, unit_label)
 
-def parse_ps(path: str, top_n: int = 10) -> Optional[list]:
+def parse_ps(path: str, top_n: int = DEFAULT_TOP_N) -> Optional[list]:
     """
     Parse a ps output file and return the top N processes by RSS.
     Skips continuation/thread lines where PID is '-'.
@@ -601,7 +602,7 @@ def parse_ps(path: str, top_n: int = 10) -> Optional[list]:
     return [header] + [line for _, line in procs[:top_n]]
 
 
-def print_top_procs(ps_path: str, top_n: int = 10):
+def print_top_procs(ps_path: str, top_n: int = DEFAULT_TOP_N):
     rows = parse_ps(ps_path, top_n)
     if rows is None:
         print(f"Warning: ps file not found: {ps_path}")
@@ -631,7 +632,7 @@ def print_top_procs(ps_path: str, top_n: int = 10):
     print()
 
 
-def print_top_cmds(ps_path: str, top_n: int = 10):
+def print_top_cmds(ps_path: str, top_n: int = DEFAULT_TOP_N):
     """
     Aggregate RSS by the first token of COMMAND, skipping continuation lines
     where PID is '-'. Prints top N commands by total RSS plus a grand total.
@@ -685,7 +686,7 @@ def print_top_cmds(ps_path: str, top_n: int = 10):
 
 
 
-def print_top_users(ps_path: str, top_n: int = 10):
+def print_top_users(ps_path: str, top_n: int = DEFAULT_TOP_N):
     """
     Aggregate RSS by USER, skipping continuation lines where PID is '-'.
     Prints top N users by total RSS plus a grand total.
@@ -762,20 +763,28 @@ def main():
         metavar="BYTES",
         help="Machine page size in bytes for buddyinfo totals (default: %(default)s, x86_64).",
     )
+    parser.add_argument(
+        "-T",
+        type=int,
+        default=DEFAULT_TOP_N,
+        metavar="N",
+        dest="top",
+        help="Show top N entries for listing modes (-p / -c / -u). Default: %(default)s.",
+    )
     parser.add_argument("path", nargs="?", help="sosreport root or /proc/meminfo file (default: cwd)")
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("-i", nargs="?", const=True, metavar="MEMINFO_FILE",
                       help="Show memory info (default mode). Optionally specify a meminfo file path.")
     mode.add_argument("-p", nargs="?", const=True, metavar="PS_FILE",
-                      help="Show top 10 processes by RSS. Optionally specify a ps file path; "
-                           "defaults to <sosroot>/ps or ./ps")
+                      help="Show top N processes by RSS (N from -T, default 10). "
+                           "Optionally specify a ps file path; defaults to <sosroot>/ps or ./ps")
     mode.add_argument("-c", nargs="?", const=True, metavar="PS_FILE",
-                      help="Show top 10 commands by aggregated RSS. Optionally specify a ps file path; "
-                           "defaults to <sosroot>/ps or ./ps")
+                      help="Show top N commands by aggregated RSS (N from -T, default 10). "
+                           "Optionally specify a ps file path; defaults to <sosroot>/ps or ./ps")
     mode.add_argument("-u", nargs="?", const=True, metavar="PS_FILE",
-                      help="Show top 10 users by aggregated RSS. Optionally specify a ps file path; "
-                           "defaults to <sosroot>/ps or ./ps")
+                      help="Show top N users by aggregated RSS (N from -T, default 10). "
+                           "Optionally specify a ps file path; defaults to <sosroot>/ps or ./ps")
     mode.add_argument(
         "-b",
         nargs="?",
@@ -788,6 +797,10 @@ def main():
 
     if args.pagesize <= 0:
         print("Error: --pagesize must be a positive integer (bytes).", file=sys.stderr)
+        sys.exit(1)
+
+    if args.top <= 0:
+        print("Error: -T must be a positive integer.", file=sys.stderr)
         sys.exit(1)
 
     # Default to -i mode when none of the mode flags is given
@@ -824,7 +837,7 @@ def main():
             ps_path = path
         else:
             ps_path = os.path.join(path, "ps")
-        print_top_procs(ps_path)
+        print_top_procs(ps_path, top_n=args.top)
 
     elif args.c:
         if isinstance(args.c, str):
@@ -834,7 +847,7 @@ def main():
             ps_path = path
         else:
             ps_path = os.path.join(path, "ps")
-        print_top_cmds(ps_path)
+        print_top_cmds(ps_path, top_n=args.top)
 
     elif args.u:
         if isinstance(args.u, str):
@@ -844,7 +857,7 @@ def main():
             ps_path = path
         else:
             ps_path = os.path.join(path, "ps")
-        print_top_users(ps_path)
+        print_top_users(ps_path, top_n=args.top)
 
     elif args.b:
         if isinstance(args.b, str):
