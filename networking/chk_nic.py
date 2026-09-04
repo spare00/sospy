@@ -7,12 +7,13 @@ import argparse
 import sys
 
 STANDARD_BUFFER_SIZE = 2  # KiB per descriptor at MTU 1500 (4K page split)
-JUMBO_BUFFER_SIZE = 16    # KiB per descriptor when MTU > 1500 (order-2 page)
+JUMBO_BUFFER_SIZE = 8     # KiB per descriptor when MTU > 1500 (order-1 page)
 SOS_ETHTOOL_G_GLOB = "sos_commands/networking/ethtool_-g_*"
 SOS_ETHTOOL_L_DIR = "sos_commands/networking"
 SYS_CLASS_NET = "sys/class/net"
 PROC_INTERRUPTS = "proc/interrupts"
 IP_ADDR_DETAIL_PATH = "sos_commands/networking/ip_-d_address"
+IFCFG_DIR = "etc/sysconfig/network-scripts"
 
 # Logical/virtual devices do not allocate hardware DMA rings themselves.
 VIRTUAL_PREFIXES = (
@@ -107,12 +108,49 @@ def _sysfs_up(root, iface):
         return None
 
 
+def _ifcfg_mtu(root, iface):
+    path = os.path.join(root, IFCFG_DIR, f"ifcfg-{iface}")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                match = re.match(r'^\s*MTU\s*=\s*["\']?(\d+)', line, re.IGNORECASE)
+                if match:
+                    return int(match.group(1))
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def discover_virtual_ifaces(root):
+    """Virtual ifaces from sysfs and ifcfg — they often have no ethtool -g."""
+    found = set()
+    netdir = os.path.join(root, SYS_CLASS_NET)
+    if os.path.isdir(netdir):
+        for name in os.listdir(netdir):
+            if is_virtual_iface(name):
+                found.add(name)
+    ifcfg_dir = os.path.join(root, IFCFG_DIR)
+    if os.path.isdir(ifcfg_dir):
+        for fname in os.listdir(ifcfg_dir):
+            if fname.startswith("ifcfg-") and fname != "ifcfg-lo":
+                name = fname[len("ifcfg-"):]
+                if is_virtual_iface(name):
+                    found.add(name)
+    return found
+
+
 def get_mtu(iface, link_info, root, verbose=False):
     mtu = link_info.get(iface, {}).get("mtu")
     if mtu:
         return mtu
 
     mtu = _sysfs_mtu(root, iface)
+    if mtu:
+        return mtu
+
+    mtu = _ifcfg_mtu(root, iface)
     if mtu:
         return mtu
 
@@ -239,10 +277,10 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
     label = unit_label.get(unit.upper(), "MiB")
     mode = "RX+TX" if include_tx else "RX only"
 
-    header_fmt = "{:<15} {:<8} {:>5} {:>7} {:>7} {:>7} {:>14} {:>10}"
-    row_fmt = "{:<15} {:<8} {:>5} {:>7} {:>7} {:>7} {:>14,} {:>10.2f}"
-    # pad total label to the start of the memory column
-    total_pad = 15 + 1 + 8 + 1 + 5 + 1 + 7 + 1 + 7 + 1 + 7 + 1 + 14
+    header_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>14} {:>10}"
+    row_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>14,} {:>10.2f}"
+    virt_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>14} {:>10}"
+    total_pad = 15 + 1 + 10 + 1 + 5 + 1 + 7 + 1 + 7 + 1 + 7 + 1 + 14
 
     print(header_fmt.format(
         "Interface", "Status", "MTU", "Queues", "RX", "TX", "BufSize(KiB)", label
@@ -253,7 +291,13 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
     up_kb = 0
     verbose_lines = []
 
-    for iface, status, mtu, queues, rx, tx, buffer_size, qsrc in nic_data:
+    for iface, status, mtu, queues, rx, tx, buffer_size, qsrc, virtual in nic_data:
+        if virtual:
+            print(virt_fmt.format(iface, status, mtu, "-", "-", "-", "N/A", "N/A"))
+            if verbose:
+                verbose_lines.append(f"{iface}: virtual device, no hardware DMA rings")
+            continue
+
         desc_count = (rx + tx) if include_tx else rx
         buffer_count = desc_count * queues
         iface_kb = buffer_count * buffer_size
@@ -281,19 +325,38 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
     print("-" * (total_pad + 1 + 10))
     print(f"{'Total (' + mode + ')':<{total_pad}}{total_converted:>10.2f} {label}")
 
-    has_up = any(status == "UP" for _, status, *_ in nic_data)
-    has_down = any(status == "DOWN" for _, status, *_ in nic_data)
+    physical = [r for r in nic_data if not r[8]]
+    has_up = any(status == "UP" for _, status, *_ in physical)
+    has_down = any(status == "DOWN" for _, status, *_ in physical)
     if has_up and has_down:
         up_converted = scale_value(up_kb, unit)
         print(f"{'  UP interfaces only':<{total_pad}}{up_converted:>10.2f} {label}")
 
-    if not include_tx:
-        print(f"\nTX rings excluded; pass --tx to include them in the estimate.")
+    if include_tx:
+        print("\nFormula: (RX + TX) * queues * bufsize")
+        print("TX packet buffers are usually mapped SKBs already in RSS/slab; "
+              "--tx is a high bound, not typical unaccounted DMA.")
+    else:
+        print("\nFormula: RX * queues * bufsize  (TX ring size is shown, not counted)")
+        print("Pass --tx to also count TX rings at the same buffer size as RX.")
 
     if verbose and verbose_lines:
         print("\nVerbose calculations:")
         for line in verbose_lines:
             print(line)
+
+
+def _status_str(iface, link_info, root, virtual=False):
+    is_up = get_is_up(iface, link_info, root)
+    if is_up is True:
+        status = "UP"
+    elif is_up is False:
+        status = "DOWN"
+    else:
+        status = "?"
+    if virtual:
+        status = f"{status}/virt"
+    return status
 
 
 def build_nic_data(nic_info, root, verbose=False, use_max=False, include_virtual=False):
@@ -302,31 +365,28 @@ def build_nic_data(nic_info, root, verbose=False, use_max=False, include_virtual
     nic_data = []
 
     for iface, (rx, rx_jumbo, tx) in nic_info.items():
-        if is_virtual_iface(iface) and not include_virtual:
+        virtual = is_virtual_iface(iface)
+        if virtual and not include_virtual:
             continue
 
         mtu = get_max_mtu(iface, link_info, root, verbose) if use_max \
             else get_mtu(iface, link_info, root, verbose)
+
+        if virtual:
+            status = _status_str(iface, link_info, root, virtual=True)
+            nic_data.append((iface, status, mtu, 0, 0, 0, 0, None, True))
+            continue
+
         queues, qsrc = get_queue_count(root, iface, irq_lines)
         if queues == 0:
             continue
 
-        is_up = get_is_up(iface, link_info, root)
-        if is_up is True:
-            status = "UP"
-        elif is_up is False:
-            status = "DOWN"
-        else:
-            status = "?"
-
-        if is_virtual_iface(iface):
-            status = f"{status}/virt"
-
+        status = _status_str(iface, link_info, root)
         buffer_size = JUMBO_BUFFER_SIZE if mtu > 1500 else STANDARD_BUFFER_SIZE
         active_rx = rx_jumbo if mtu > 1500 and rx_jumbo > 0 else rx
+        nic_data.append((iface, status, mtu, queues, active_rx, tx, buffer_size, qsrc, False))
 
-        nic_data.append((iface, status, mtu, queues, active_rx, tx, buffer_size, qsrc))
-
+    nic_data.sort(key=lambda row: row[0])
     return nic_data
 
 
@@ -374,7 +434,7 @@ def main():
     parser.add_argument("-d", "--debug", action="store_true",
         help="Print debug info about files used by the script")
     parser.add_argument("--virtual", action="store_true",
-        help="Include virtual devices (bond, bridge, vlan, veth, ...)")
+        help="List virtual devices (bond, bridge, vlan, veth, ...) as N/A; they have no DMA rings")
 
     tx_group = parser.add_mutually_exclusive_group()
     tx_group.add_argument("--tx", dest="include_tx", action="store_true",
@@ -394,10 +454,6 @@ def main():
     filter_pattern = args.filter
 
     ethtool_files = sorted(glob.glob(os.path.join(root, SOS_ETHTOOL_G_GLOB)))
-    if not ethtool_files:
-        print(f"No {os.path.join(root, SOS_ETHTOOL_G_GLOB)} files found")
-        sys.exit(1)
-
     nic_info = {}
     for f in ethtool_files:
         iface, rx, rx_jumbo, tx = parse_ethtool_g(f, use_max=args.max)
@@ -405,8 +461,21 @@ def main():
             continue
         nic_info[iface] = (rx, rx_jumbo, tx)
 
+    if args.virtual:
+        for iface in discover_virtual_ifaces(root):
+            if filter_pattern and filter_pattern not in iface:
+                continue
+            nic_info.setdefault(iface, (0, 0, 0))
+
     if not nic_info:
-        print(f"No matching interfaces for filter: '{filter_pattern}'")
+        if not ethtool_files:
+            print(f"No {os.path.join(root, SOS_ETHTOOL_G_GLOB)} files found")
+        elif filter_pattern:
+            print(f"No matching interfaces for filter: '{filter_pattern}'")
+            if not args.virtual:
+                print("Virtual devices are omitted unless you pass --virtual.")
+        else:
+            print("No interfaces found.")
         sys.exit(1)
 
     if args.debug:
@@ -423,7 +492,7 @@ def main():
         print("No interfaces with a usable queue count "
               "(ethtool -l Combined/RX, else /proc/interrupts).")
         if not args.virtual:
-            print("Virtual devices are skipped; pass --virtual to include them.")
+            print("Virtual devices are omitted; pass --virtual to list them as N/A.")
         sys.exit(1)
 
     print_nic_memory_table(
