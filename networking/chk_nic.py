@@ -278,14 +278,21 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
     mode = "RX+TX" if include_tx else "RX only"
 
     buf_width = 16
-    header_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
-    row_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10.2f}"
-    virt_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
-    total_pad = 15 + 1 + 10 + 1 + 5 + 1 + 7 + 1 + 7 + 1 + 7 + 1 + buf_width
+    # TX column is only meaningful when --tx includes it in the estimate.
+    if include_tx:
+        header_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
+        row_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10.2f}"
+        virt_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
+        total_pad = 15 + 1 + 10 + 1 + 5 + 1 + 7 + 1 + 7 + 1 + 7 + 1 + buf_width
+        headers = ("Interface", "Status", "MTU", "Queues", "RX", "TX", "BufSize(KiB)", label)
+    else:
+        header_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
+        row_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10.2f}"
+        virt_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
+        total_pad = 15 + 1 + 10 + 1 + 5 + 1 + 7 + 1 + 7 + 1 + buf_width
+        headers = ("Interface", "Status", "MTU", "Queues", "RX", "BufSize(KiB)", label)
 
-    print(header_fmt.format(
-        "Interface", "Status", "MTU", "Queues", "RX", "TX", "BufSize(KiB)", label
-    ))
+    print(header_fmt.format(*headers))
     print("-" * (total_pad + 1 + 10))
 
     total_kb = 0
@@ -294,7 +301,10 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
 
     for iface, status, mtu, queues, rx, tx, buffer_size, qsrc, virtual in nic_data:
         if virtual:
-            print(virt_fmt.format(iface, status, mtu, "-", "-", "-", "N/A", "N/A"))
+            if include_tx:
+                print(virt_fmt.format(iface, status, mtu, "-", "-", "-", "N/A", "N/A"))
+            else:
+                print(virt_fmt.format(iface, status, mtu, "-", "-", "N/A", "N/A"))
             if verbose:
                 verbose_lines.append(f"{iface}: virtual device, no hardware DMA rings")
             continue
@@ -311,7 +321,10 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
         else:
             buf_str = f"{buffer_size} (Std/Split)"
 
-        print(row_fmt.format(iface, status, mtu, queues, rx, tx, buf_str, converted))
+        if include_tx:
+            print(row_fmt.format(iface, status, mtu, queues, rx, tx, buf_str, converted))
+        else:
+            print(row_fmt.format(iface, status, mtu, queues, rx, buf_str, converted))
 
         if verbose:
             if include_tx:
@@ -347,8 +360,8 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
         print("TX packet buffers are usually mapped SKBs already in RSS/slab; "
               "--tx is a high bound, not typical unaccounted DMA.")
     else:
-        print("\nFormula: RX * queues * bufsize  (TX ring size is shown, not counted)")
-        print("Pass --tx to also count TX rings at the same buffer size as RX.")
+        print("\nFormula: RX * queues * bufsize")
+        print("Pass --tx to also show and count TX rings.")
 
     if verbose:
         if verbose_lines:
