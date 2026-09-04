@@ -277,10 +277,11 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
     label = unit_label.get(unit.upper(), "MiB")
     mode = "RX+TX" if include_tx else "RX only"
 
-    header_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>14} {:>10}"
-    row_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>14,} {:>10.2f}"
-    virt_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>14} {:>10}"
-    total_pad = 15 + 1 + 10 + 1 + 5 + 1 + 7 + 1 + 7 + 1 + 7 + 1 + 14
+    buf_width = 16
+    header_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
+    row_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10.2f}"
+    virt_fmt = "{:<15} {:<10} {:>5} {:>7} {:>7} {:>7} {:>" + str(buf_width) + "} {:>10}"
+    total_pad = 15 + 1 + 10 + 1 + 5 + 1 + 7 + 1 + 7 + 1 + 7 + 1 + buf_width
 
     print(header_fmt.format(
         "Interface", "Status", "MTU", "Queues", "RX", "TX", "BufSize(KiB)", label
@@ -305,8 +306,12 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
         if status == "UP":
             up_kb += iface_kb
         converted = scale_value(iface_kb, unit)
+        if buffer_size > STANDARD_BUFFER_SIZE:
+            buf_str = f"{buffer_size} (Jumbo)"
+        else:
+            buf_str = f"{buffer_size} (Std/Split)"
 
-        print(row_fmt.format(iface, status, mtu, queues, rx, tx, buffer_size, converted))
+        print(row_fmt.format(iface, status, mtu, queues, rx, tx, buf_str, converted))
 
         if verbose:
             if include_tx:
@@ -321,16 +326,21 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
             )
             verbose_lines.append(formula)
 
-    total_converted = scale_value(total_kb, unit)
+    def format_total_value(kb):
+        primary = scale_value(kb, unit)
+        if unit == "G":
+            return f"{primary:>10.2f} {label}"
+        gib = scale_value(kb, "G")
+        return f"{primary:>10.2f} {label} ({gib:.3f} GiB)"
+
     print("-" * (total_pad + 1 + 10))
-    print(f"{'Total (' + mode + ')':<{total_pad}}{total_converted:>10.2f} {label}")
+    print(f"{'Total (' + mode + ')':<{total_pad}}{format_total_value(total_kb)}")
 
     physical = [r for r in nic_data if not r[8]]
     has_up = any(status == "UP" for _, status, *_ in physical)
     has_down = any(status == "DOWN" for _, status, *_ in physical)
     if has_up and has_down:
-        up_converted = scale_value(up_kb, unit)
-        print(f"{'  UP interfaces only':<{total_pad}}{up_converted:>10.2f} {label}")
+        print(f"{'  UP interfaces only':<{total_pad}}{format_total_value(up_kb)}")
 
     if include_tx:
         print("\nFormula: (RX + TX) * queues * bufsize")
