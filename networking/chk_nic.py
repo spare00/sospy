@@ -350,10 +350,16 @@ def print_nic_memory_table(nic_data, verbose=False, unit="M", include_tx=False):
         print("\nFormula: RX * queues * bufsize  (TX ring size is shown, not counted)")
         print("Pass --tx to also count TX rings at the same buffer size as RX.")
 
-    if verbose and verbose_lines:
-        print("\nVerbose calculations:")
-        for line in verbose_lines:
-            print(line)
+    if verbose:
+        if verbose_lines:
+            print("\nVerbose calculations:")
+            for line in verbose_lines:
+                print(line)
+        print("\nCalculations Explanation:")
+        print("1. Each hardware queue and descriptor corresponds to a shared memory slot for the NIC.")
+        print("2. Under MTU 1500, modern drivers split a 4KB page into two 2KB buffers, using 2KB per descriptor.")
+        print("3. Under Jumbo Frames (MTU 9000), packet buffers must allocate contiguous chunks larger than 3KB, requiring an order-1 page allocation (8KB) per descriptor.")
+        print("4. This memory is allocated directly via DMA API (alloc_pages) and does NOT show up in any /proc/meminfo fields.")
 
 
 def _status_str(iface, link_info, root, virtual=False):
