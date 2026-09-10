@@ -21,13 +21,14 @@ def parse_slabinfo(file_path, page_size_bytes):
 
             name = fields[0]
             try:
+                num_objs = int(fields[2])
                 pagesperslab = int(fields[5])
                 num_slabs = int(fields[-2])
             except ValueError:
                 continue
 
             memory_usage_kib = (pagesperslab * num_slabs * page_size_bytes) // 1024
-            slab_data.append((memory_usage_kib, name))
+            slab_data.append((memory_usage_kib, num_objs, name))
             total_memory_kib += memory_usage_kib
 
         return slab_data, total_memory_kib
@@ -56,18 +57,17 @@ def format_slab_data(slab_data, total_memory_kib, unit):
         label = "GiB"
         total_label = "GB"
 
-    header = f"{f'Memory ({label})':>15} | {'Slab Name':<20}"
+    header = f"{'Num_Objs':>12} {f'Memory ({label})':>15} | {'Slab Name':<20}"
     separator = "-" * len(header)
     result.append(header)
     result.append(separator)
 
-    for size_kib, name in slab_data:
+    for size_kib, num_objs, name in slab_data:
         size = size_kib * factor
-        result.append(f"{size:15.1f} | {name:<30}")
+        result.append(f"{num_objs:12d} {size:15.1f} | {name:<30}")
 
-    total = total_memory_kib * factor
     result.append(separator)
-    result.append(f"{'Total':>15} | {total_memory_kib * factor:.1f} {total_label}")
+    result.append(f"{'':>12} {'Total':>15} | {total_memory_kib * factor:.1f} {total_label}")
 
     return result
 
