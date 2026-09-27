@@ -42,6 +42,7 @@ def is_java_process(command_fields):
 def parse_stream(lines):
     rows = []
     java_process_count = 0
+    java_without_xmx_count = 0
     total_rss_mb = 0.0
     total_vsz_mb = 0.0
     total_xms_mb = 0
@@ -91,6 +92,8 @@ def parse_stream(lines):
 
         if xmx_last:
             total_xmx_mb += to_mb(xmx_last)
+        else:
+            java_without_xmx_count += 1
 
         rows.append(
             (
@@ -110,7 +113,15 @@ def parse_stream(lines):
             )
         )
 
-    return rows, java_process_count, total_rss_mb, total_vsz_mb, total_xms_mb, total_xmx_mb
+    return (
+        rows,
+        java_process_count,
+        java_without_xmx_count,
+        total_rss_mb,
+        total_vsz_mb,
+        total_xms_mb,
+        total_xmx_mb,
+    )
 
 
 def main():
@@ -120,7 +131,15 @@ def main():
     else:
         result = parse_stream(sys.stdin)
 
-    rows, java_process_count, total_rss_mb, total_vsz_mb, total_xms_mb, total_xmx_mb = result
+    (
+        rows,
+        java_process_count,
+        java_without_xmx_count,
+        total_rss_mb,
+        total_vsz_mb,
+        total_xms_mb,
+        total_xmx_mb,
+    ) = result
 
     header = "{:<8} {:<7} {:<5} {:<5} {:<10} {:<10} {:<6} {:<10} {:<9} {:<9} {:<24} {:<24} {:<24}".format(
         "USER",
@@ -144,6 +163,10 @@ def main():
 
     print()
     print(f"Java process count: {java_process_count}")
+    print(
+        f"Java processes without -Xmx: {java_without_xmx_count} "
+        "(heap max unset; not included in the Xmx total below)"
+    )
     print(f"Total Java resident memory in use (RSS): {total_rss_mb:.1f} MB")
     print(f"Total Java virtual memory size (VSZ): {total_vsz_mb:.1f} MB")
     print(f"Total Java initial heap memory (Xms, last match used): {total_xms_mb} MB")
