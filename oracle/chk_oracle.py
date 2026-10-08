@@ -9,7 +9,8 @@ chk_oracle.py — Oracle memory and RHEL tuning checks for a sosreport or live /
 --mem
     Memory used by Oracle: process RSS, per-SID totals, SysV shared memory
     (SGA), static HugePages, and /dev/shm. Process RSS counts shared mappings
-    once per process; the estimated footprint tries not to.
+    once per process; the estimated footprint tries not to. Also compares the
+    SGA with the HugePages pool and the RAM left for PGA and Oracle processes.
 
 --validate
     Compare the running system with Red Hat's Oracle guidance:
@@ -26,7 +27,9 @@ chk_oracle.py — Oracle memory and RHEL tuning checks for a sosreport or live /
         vm.dirty_writeback_centisecs = 100
         kernel.numa_balancing = 0, and do not boot with numa=off
         transparent hugepages = never
-        static HugePages for the SGA, not more than about 90% of RAM
+        static HugePages sized to the SGA (solution 64147): use HugePages
+        rather than AMM, keep the pool at or below about 70% of RAM, and
+        leave the rest for PGA and Oracle processes
         swap: 1.5x RAM if RAM <= 2 GiB, equal to RAM if RAM <= 16 GiB,
               otherwise 16 GiB
         kernel.shmmax at least half of RAM, or the 4 TiB TuneD value
@@ -79,6 +82,17 @@ DIRTY_EXPIRE = 500
 DIRTY_WRITEBACK = 100
 HUGEPAGE_RAM_FRACTION = 0.90
 HUGEPAGE_UNUSED_FRACTION = 0.50
+# Solution 64147 / Oracle HugePages guidance: keep at least 30% of RAM as
+# normal pages. PGA and process memory cannot use the HugePages pool.
+SGA_RAM_FRACTION = 0.70
+# Pool larger than the SGA by this much is wasted: free hugepages cannot back PGA.
+HUGE_EXCESS_FRACTION = 0.15
+HUGE_EXCESS_MIN_BYTES = 1024 ** 3
+# Private memory at or above this share of the non-hugepage RAM is tight.
+PROCESS_TIGHT_FRACTION = 0.60
+# Dedicated server counts at or above this are unusual enough to call out
+# even when current PGA still fits.
+SERVER_COUNT_EXTREME = 1000
 NOFILE_MIN = 65_536
 NPROC_MIN = 16_384
 STACK_MIN_KB = 32_768
@@ -246,6 +260,27 @@ class Footprint:
     total_bytes: int
     method: str
     shared_note: str
+
+
+@dataclass
+class MemoryPlan:
+    """SGA, the HugePages pool sized from it, and RAM left for processes."""
+    ram_bytes: int | None
+    page_bytes: int | None
+    pool_pages: int | None
+    pool_bytes: int
+    inuse_bytes: int
+    sga_bytes: int
+    sga_source: str
+    need_pages: int | None
+    private_bytes: int
+    private_method: str
+    private_confident: bool
+    nprocs: int
+    n_server: int
+    reserved_bytes: int
+    remaining_bytes: int | None
+    os_reserve_bytes: int | None
 
 
 @dataclass
@@ -1372,6 +1407,91 @@ def estimate_footprint(host: Host, segs: list[ShmSeg]) -> Footprint:
     )
 
 
+def hugepage_geometry(host: Host) -> tuple[int | None, int, int, int | None]:
+    """Return (page size in bytes, pool bytes, in-use bytes, pool page count)."""
+    total = host.meminfo.get("HugePages_Total")
+    if total is None:
+        return None, 0, 0, None
+    size_kb = host.meminfo.get("Hugepagesize") or 2048
+    page = size_kb * 1024
+    free = host.meminfo.get("HugePages_Free")
+    inuse_pages = total if free is None else max(0, total - free)
+    return page, total * page, inuse_pages * page, total
+
+
+def pages_covering(nbytes: int, page_bytes: int) -> int:
+    if nbytes <= 0 or page_bytes <= 0:
+        return 0
+    return (nbytes + page_bytes - 1) // page_bytes
+
+
+def os_reserve_bytes(ram_bytes: int) -> int:
+    """RAM to leave for the OS after the SGA and current PGA. About 5%, clamped."""
+    return min(4 * 1024 ** 3, max(512 * 1024 ** 2, ram_bytes // 20))
+
+
+def assess_memory(host: Host) -> MemoryPlan:
+    """
+    HugePages are sized from the SGA and then reserved.
+
+    The pool, including free hugepages, cannot be used as PGA or for other
+    processes. Oracle memory is that reservation plus private process memory,
+    and it has to fit in MemTotal.
+    """
+    page, pool, inuse, pool_pages = hugepage_geometry(host)
+    segs = oracle_segments(host)
+    foot = estimate_footprint(host, segs)
+    alloc = sum(seg.size_bytes for seg in segs)
+    if alloc > 0:
+        sga = alloc
+        source = "SysV shared-memory segment size"
+    elif inuse > 0:
+        sga = inuse
+        source = "HugePages in use"
+    elif (host.devshm_used_bytes or 0) >= SHM_ORACLE_MIN_BYTES:
+        sga = host.devshm_used_bytes or 0
+        source = "/dev/shm used (MEMORY_TARGET/AMM)"
+    else:
+        sga = 0
+        source = ""
+    need_pages: int | None = None
+    if page:
+        if segs and alloc > 0:
+            need_pages = sum(pages_covering(seg.size_bytes, page) for seg in segs)
+        elif sga > 0:
+            need_pages = pages_covering(sga, page)
+    ram = mem_bytes(host)
+    # A configured pool is reserved even when part of it is free. Without a
+    # pool, the SGA itself still occupies ordinary RAM.
+    reserved = pool if pool > 0 else sga
+    remaining = None if ram is None else max(0, ram - reserved)
+    confident = (
+        "RssAnon" in foot.method
+        or "not part of RSS" in foot.method
+        or "minus" in foot.method
+        or foot.shared_bytes == 0
+    )
+    n_server = sum(1 for proc in host.procs if proc.kind == "server")
+    return MemoryPlan(
+        ram_bytes=ram,
+        page_bytes=page,
+        pool_pages=pool_pages,
+        pool_bytes=pool,
+        inuse_bytes=inuse,
+        sga_bytes=sga,
+        sga_source=source,
+        need_pages=need_pages,
+        private_bytes=foot.private_bytes,
+        private_method=foot.method,
+        private_confident=confident,
+        nprocs=len(host.procs),
+        n_server=n_server,
+        reserved_bytes=reserved,
+        remaining_bytes=remaining,
+        os_reserve_bytes=None if ram is None else os_reserve_bytes(ram),
+    )
+
+
 def sid_rows(procs: list[Proc]) -> list[tuple[str, str, list[Proc]]]:
     buckets: dict[str, list[Proc]] = {}
     order: list[str] = []
@@ -1474,15 +1594,24 @@ def print_mem(host: Host, top_n: int) -> None:
 
     if host.procs:
         print()
-        print(f"  {'SID':<18} {'KIND':<10} {'PROCS':>6} {'RSS':>14} {'ANON':>14}")
+        print(f"  {'SID':<18} {'KIND':<10} {'PROCS':>6} {'SERVER':>7} {'RSS':>14} {'ANON':>14}")
+        n_server_total = 0
         for sid, kind, group in sid_rows(host.procs):
             rss = sum(p.rss_kb for p in group) * 1024
             anons = [p.anon_kb for p in group if p.anon_kb is not None]
             anon_txt = fmt_bytes(sum(anons) * 1024) if len(anons) == len(group) else "-"
-            print(f"  {sid:<18} {kind:<10} {len(group):>6} {fmt_bytes(rss):>14} {anon_txt:>14}")
+            n_server = sum(1 for proc in group if proc.kind == "server")
+            n_server_total += n_server
+            print(
+                f"  {sid:<18} {kind:<10} {len(group):>6} {n_server:>7} "
+                f"{fmt_bytes(rss):>14} {anon_txt:>14}"
+            )
         rss_sum = sum(p.rss_kb for p in host.procs) * 1024
-        print(f"  {'RSS sum':<18} {'':<10} {len(host.procs):>6} {fmt_bytes(rss_sum):>14}")
-        print("  The RSS sum includes each shared mapping in every process, so it is not the footprint.")
+        print(
+            f"  {'RSS sum':<18} {'':<10} {len(host.procs):>6} {n_server_total:>7} "
+            f"{fmt_bytes(rss_sum):>14}"
+        )
+        print("  SERVER is dedicated server processes. The RSS sum includes each shared mapping in every process.")
 
         shown = sorted(host.procs, key=lambda p: p.rss_kb, reverse=True)[:top_n]
         print()
@@ -1538,6 +1667,68 @@ def print_mem(host: Host, top_n: int) -> None:
         print(f"  {'estimated total':<22} {fmt_bytes(foot.total_bytes)}{pct}")
         if total_mem and foot.total_bytes > total_mem * 1.05:
             print("    estimate is above MemTotal; shared pages are still counted more than once")
+    print_memory_plan(host)
+
+
+def print_memory_plan(host: Host) -> None:
+    plan = assess_memory(host)
+    if plan.ram_bytes is None and plan.sga_bytes <= 0 and plan.nprocs == 0:
+        return
+    print()
+    print("  SGA, HugePages, and process headroom")
+    if plan.sga_bytes > 0:
+        pct = ""
+        if plan.ram_bytes:
+            pct = f"   {plan.sga_bytes / plan.ram_bytes * 100:.1f}% of RAM"
+        print(f"  {'SGA':<22} {fmt_bytes(plan.sga_bytes)}{pct}")
+        if plan.sga_source:
+            print(f"    {plan.sga_source}")
+    else:
+        print(f"  {'SGA':<22} not found")
+    if plan.pool_pages is not None and plan.page_bytes:
+        print(
+            f"  {'HugePages pool':<22} {fmt_bytes(plan.pool_bytes)}   "
+            f"{plan.pool_pages} x {fmt_bytes(plan.page_bytes)}"
+        )
+        if plan.need_pages is not None and plan.sga_bytes > 0:
+            print(
+                f"  {'pages for SGA':<22} {plan.need_pages}   "
+                f"({fmt_bytes(plan.need_pages * plan.page_bytes)})"
+            )
+        if plan.sga_source.startswith("/dev/shm") and plan.inuse_bytes == 0:
+            print("    AMM keeps the SGA in /dev/shm; that cannot use HugePages")
+        elif plan.pool_bytes > 0 and plan.inuse_bytes == 0 and plan.sga_bytes > 0:
+            print("    HugePages pool is reserved but unused; the SGA is not in it")
+    if plan.ram_bytes is not None:
+        if plan.pool_bytes > 0:
+            left_note = "MemTotal minus the HugePages pool; free hugepages are not usable as PGA"
+        elif plan.sga_bytes > 0:
+            left_note = "MemTotal minus the SGA; the SGA is in ordinary pages"
+        else:
+            left_note = "no SGA or HugePages reservation found"
+        left = plan.remaining_bytes if plan.remaining_bytes is not None else 0
+        print(f"  {'RAM left for PGA/OS':<22} {fmt_bytes(left)}")
+        print(f"    {left_note}")
+    if plan.nprocs:
+        avg = plan.private_bytes / plan.nprocs if plan.nprocs else 0
+        print(
+            f"  {'Oracle private':<22} {fmt_bytes(plan.private_bytes)}   "
+            f"{plan.nprocs} processes ({plan.n_server} dedicated server), "
+            f"about {fmt_bytes(avg)} each"
+        )
+        print(f"    {plan.private_method}")
+        if plan.remaining_bytes is not None:
+            headroom = plan.remaining_bytes - plan.private_bytes
+            print(f"  {'headroom':<22} {fmt_bytes(headroom)}")
+            requirement = plan.reserved_bytes + plan.private_bytes
+            pct = ""
+            if plan.ram_bytes:
+                pct = f"   ({requirement / plan.ram_bytes * 100:.1f}% of RAM)"
+            print(
+                f"  {'Oracle requirement':<22} {fmt_bytes(requirement)}   "
+                f"reservation {fmt_bytes(plan.reserved_bytes)} + private "
+                f"{fmt_bytes(plan.private_bytes)}{pct}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1835,6 +2026,7 @@ def build_checks(host: Host) -> list[tuple[str, Check]]:
     section = "HugePages"
     check_hugepages(host, add)
     check_hugetlb_group(host, add)
+    check_sga_process_memory(host, add)
 
     section = "systemd IPC and limits"
     check_remove_ipc(host, add)
@@ -2133,6 +2325,211 @@ def check_swap(host: Host, add) -> None:
         add(section, "PASS", "swap size", detail)
     else:
         add(section, "WARN", "swap size", detail)
+
+
+def check_sga_process_memory(host: Host, add) -> None:
+    """
+    Solution 64147: on a large-memory Oracle server use HugePages, not AMM.
+
+    The pool is sized from the SGA and is then unavailable to PGA and
+    processes. At least 30% of RAM should stay as normal pages.
+    """
+    section = "SGA and process memory"
+    plan = assess_memory(host)
+    if plan.ram_bytes is None and plan.sga_bytes <= 0 and plan.nprocs == 0:
+        add(section, "SKIP", "SGA vs RAM", "MemTotal, SGA, and Oracle processes were not found")
+        return
+    _check_sga_ram_share(plan, add)
+    _check_hugepages_cover_sga(plan, add)
+    _check_process_headroom(plan, add)
+
+
+def _check_sga_ram_share(plan: MemoryPlan, add) -> None:
+    section = "SGA and process memory"
+    if plan.ram_bytes is None:
+        add(section, "SKIP", "SGA vs RAM", "MemTotal not in proc/meminfo")
+        return
+    reserved = plan.pool_bytes if plan.pool_bytes > 0 else plan.sga_bytes
+    if reserved <= 0:
+        add(section, "SKIP", "SGA vs RAM", "SGA size was not found")
+        return
+    kind = "HugePages pool" if plan.pool_bytes > 0 else "SGA"
+    pct = reserved / plan.ram_bytes * 100.0
+    detail = (
+        f"{kind} {fmt_bytes(reserved)} is {pct:.1f}% of RAM ({fmt_bytes(plan.ram_bytes)})"
+    )
+    if reserved > plan.ram_bytes * SGA_RAM_FRACTION:
+        add(
+            section,
+            "WARN",
+            "SGA vs RAM",
+            detail + ". Leave at least 30% of RAM as normal pages for PGA, Oracle "
+            "processes, and the OS. HugePages cannot back PGA "
+            "(https://access.redhat.com/solutions/64147)",
+        )
+        return
+    add(
+        section,
+        "PASS",
+        "SGA vs RAM",
+        detail + "; at least 30% of RAM remains for normal pages",
+    )
+
+
+def _check_hugepages_cover_sga(plan: MemoryPlan, add) -> None:
+    section = "SGA and process memory"
+    page = plan.page_bytes or (2 * 1024 * 1024)
+    large = (plan.ram_bytes or 0) >= 8 * 1024 ** 3 or plan.sga_bytes >= 1024 ** 3
+    amm = plan.sga_source.startswith("/dev/shm")
+    ref = "https://access.redhat.com/solutions/64147"
+
+    if plan.sga_bytes <= 0 and plan.pool_bytes <= 0:
+        add(section, "SKIP", "HugePages vs SGA", "SGA size was not found")
+        return
+
+    if amm and plan.inuse_bytes == 0:
+        add(
+            section,
+            "WARN" if large else "INFO",
+            "HugePages vs AMM",
+            f"SGA looks like AMM in /dev/shm ({fmt_bytes(plan.sga_bytes)}). "
+            f"AMM and HugePages are not compatible. Use HugePages with SGA_TARGET, "
+            f"and keep PGA_AGGREGATE_TARGET outside the SGA ({ref})",
+        )
+        return
+
+    if plan.pool_pages is None:
+        add(section, "SKIP", "HugePages vs SGA", "HugePages_Total not in proc/meminfo")
+        return
+
+    if plan.pool_bytes > 0 and plan.inuse_bytes == 0 and plan.sga_bytes > 0:
+        add(
+            section,
+            "WARN",
+            "HugePages vs SGA",
+            f"pool {fmt_bytes(plan.pool_bytes)} is unused while the SGA is "
+            f"{fmt_bytes(plan.sga_bytes)}. Oracle is not placing the SGA in HugePages. "
+            f"That happens with AMM, a memlock limit below the pool, or an instance "
+            f"that started before the pool was reserved ({ref})",
+        )
+        return
+
+    if plan.pool_pages == 0 and plan.sga_bytes > 0:
+        pages = plan.need_pages or pages_covering(plan.sga_bytes, page)
+        add(
+            section,
+            "WARN" if large else "INFO",
+            "HugePages vs SGA",
+            f"SGA {fmt_bytes(plan.sga_bytes)} needs about {pages} x {fmt_bytes(page)} "
+            f"and the pool is empty. PGA and Oracle processes then compete with the "
+            f"SGA for normal pages ({ref})",
+        )
+        return
+
+    if plan.need_pages is not None and plan.pool_pages < plan.need_pages:
+        add(
+            section,
+            "FAIL",
+            "HugePages vs SGA",
+            f"pool has {plan.pool_pages} pages ({fmt_bytes(plan.pool_bytes)}) but the SGA "
+            f"needs {plan.need_pages} ({fmt_bytes(plan.need_pages * page)}). "
+            f"Part of the SGA is not in HugePages",
+        )
+        return
+
+    if plan.sga_bytes > 0 and plan.pool_bytes > plan.sga_bytes:
+        excess = plan.pool_bytes - plan.sga_bytes
+        limit = max(HUGE_EXCESS_MIN_BYTES, int(plan.sga_bytes * HUGE_EXCESS_FRACTION))
+        if excess > limit:
+            add(
+                section,
+                "WARN",
+                "HugePages vs SGA",
+                f"pool {fmt_bytes(plan.pool_bytes)} exceeds SGA {fmt_bytes(plan.sga_bytes)} "
+                f"by {fmt_bytes(excess)}. Those pages stay reserved and cannot be used "
+                f"by PGA or Oracle processes",
+            )
+            return
+
+    if plan.sga_bytes > 0:
+        add(
+            section,
+            "PASS",
+            "HugePages vs SGA",
+            f"pool {fmt_bytes(plan.pool_bytes)} covers SGA {fmt_bytes(plan.sga_bytes)}",
+        )
+        return
+    add(
+        section,
+        "INFO",
+        "HugePages vs SGA",
+        f"pool is {fmt_bytes(plan.pool_bytes)} and no SGA was found in shared memory",
+    )
+
+
+def _check_process_headroom(plan: MemoryPlan, add) -> None:
+    section = "SGA and process memory"
+    if plan.nprocs == 0:
+        add(section, "SKIP", "process memory", "no Oracle processes in the capture")
+        return
+    if plan.remaining_bytes is None:
+        add(section, "SKIP", "process memory", "MemTotal not in proc/meminfo")
+        return
+    remaining = plan.remaining_bytes
+    private = plan.private_bytes
+    reserve = plan.os_reserve_bytes or 0
+    background = plan.nprocs - plan.n_server
+    average = private / plan.nprocs if plan.nprocs else 0
+    detail = (
+        f"{plan.nprocs} processes ({plan.n_server} dedicated server, {background} background), "
+        f"private {fmt_bytes(private)}"
+    )
+    if private > 0:
+        detail += f" (about {fmt_bytes(average)} each)"
+    if plan.pool_bytes > 0:
+        left = "after the HugePages pool"
+    elif plan.sga_bytes > 0:
+        left = "after the SGA"
+    else:
+        left = "of RAM"
+    headroom = remaining - private
+    uncertain = ""
+    if not plan.private_confident:
+        uncertain = " Private memory may still include shared mappings."
+    if private > remaining:
+        status = "FAIL" if plan.private_confident else "WARN"
+        add(
+            section,
+            status,
+            "process memory",
+            f"{detail} exceeds the {fmt_bytes(remaining)} left {left}. "
+            f"The SGA reservation does not leave enough normal memory for these processes."
+            f"{uncertain}",
+        )
+        return
+    tight = private + reserve > remaining or (
+        remaining > 0 and private >= remaining * PROCESS_TIGHT_FRACTION
+    )
+    extreme = plan.n_server >= SERVER_COUNT_EXTREME
+    if tight or extreme:
+        notes = [f"{fmt_bytes(remaining)} left {left}, headroom {fmt_bytes(headroom)}"]
+        if tight:
+            notes.append(
+                "process memory is most of the RAM that is not reserved for the SGA"
+            )
+        if extreme:
+            notes.append(
+                f"{plan.n_server} dedicated server processes is unusually large; "
+                f"each additional session adds about {fmt_bytes(average)}"
+            )
+        add(section, "WARN", "process memory", f"{detail}; " + "; ".join(notes) + f".{uncertain}")
+        return
+    add(
+        section,
+        "PASS",
+        "process memory",
+        f"{detail}; {fmt_bytes(remaining)} left {left}, headroom {fmt_bytes(headroom)}",
+    )
 
 
 def check_hugepages(host: Host, add) -> None:
@@ -2524,7 +2921,9 @@ def main(argv: list[str] | None = None) -> int:
     print()
     print("Tuning validation")
     print("Reference: https://access.redhat.com/solutions/39188")
-    print("           RHEL TuneD profile oracle and Oracle Database minimum kernel parameters")
+    print("           https://access.redhat.com/solutions/64147")
+    print("           RHEL TuneD profile oracle, Oracle minimum kernel parameters,")
+    print("           and HugePages sized from the SGA rather than AMM")
     print()
     verdict = print_checks(build_checks(host), verbose=args.verbose, color=color)
     if verdict == "EMPTY":
