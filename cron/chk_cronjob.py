@@ -260,7 +260,6 @@ def print_table(headers, data):
     # Format line builder
     border = "+" + "+".join("-" * (widths[h] + 2) for h in headers) + "+"
     print(border)
-
     header_line = "|" + "|".join(f" {h:<{widths[h]}} " for h in headers) + "|"
     print(header_line)
     print(border.replace('-', '='))
@@ -269,6 +268,16 @@ def print_table(headers, data):
         row_line = "|" + "|".join(f" {str(row.get(h, '')):<{widths[h]}} " for h in headers) + "|"
         print(row_line)
     print(border)
+
+def deduplicate_jobs(jobs):
+    """Keep one row per scheduled command, preferring the first discovered source."""
+    unique = {}
+    for job in jobs:
+        key = (job["User"], job["Schedule"], job["Command"])
+        unique.setdefault(key, job)
+    return sorted(unique.values(), key=lambda job: (
+        job["Schedule"], job["User"], job["Command"]
+    ))
 
 def main():
     parser = argparse.ArgumentParser(
@@ -327,6 +336,7 @@ def main():
     # 6. /sos_commands/cron/ (sosreport command capture output)
     sos_cron_path = os.path.join(sos_root, "sos_commands", "cron")
     all_jobs.extend(parse_user_crontabs(sos_cron_path, "Captured Crontab", sos_root))
+    all_jobs = deduplicate_jobs(all_jobs)
 
     # Output formatting
     headers = ["Source File", "Category", "User", "Schedule", "Command"]
@@ -351,7 +361,7 @@ def main():
             for row in all_jobs:
                 writer.writerow({h: row.get(h, "") for h in headers})
         else:
-            print_table(headers, all_jobs)
+            print_table(["Schedule", "User", "Command"], all_jobs)
     finally:
         if out_file:
             sys.stdout = original_stdout
