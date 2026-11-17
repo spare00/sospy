@@ -361,7 +361,7 @@ def main():
             for row in all_jobs:
                 writer.writerow({h: row.get(h, "") for h in headers})
         else:
-            print_table(["Schedule", "User", "Command", "Source File"], all_jobs)
+            print_table(["Schedule", "User", "Source File", "Command"], all_jobs)
     finally:
         if out_file:
             sys.stdout = original_stdout
