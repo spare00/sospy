@@ -3,8 +3,10 @@
 import re
 import argparse
 
+UNITS = {'K': (2**10, 'KiB'), 'M': (2**20, 'MiB'), 'G': (2**30, 'GiB')}
+
 # Function to parse and display statistics
-def show_statistics(file_path):
+def show_statistics(file_path, unit_factor, unit_name):
     system_ram_size = 0
     reserved_size = 0
     device_regions_below = 0
@@ -35,14 +37,14 @@ def show_statistics(file_path):
                         device_regions_above += size
 
     # Display statistics
-    print(f"System RAM: {system_ram_size / (2**20):.2f} MB")
-    print(f"Reserved Memory: {reserved_size / (2**20):.2f} MB")
-    print(f"Device Regions Below System RAM Ceiling: {device_regions_below / (2**20):.2f} MB")
-    print(f"Device Regions Above System RAM Ceiling: {device_regions_above / (2**20):.2f} MB")
-    print(f"Crash Kernel: {crash_kernel_size / (2**20):.2f} MB")
+    print(f"System RAM: {system_ram_size / unit_factor:.2f} {unit_name}")
+    print(f"Reserved Memory: {reserved_size / unit_factor:.2f} {unit_name}")
+    print(f"Device Regions Below System RAM Ceiling: {device_regions_below / unit_factor:.2f} {unit_name}")
+    print(f"Device Regions Above System RAM Ceiling: {device_regions_above / unit_factor:.2f} {unit_name}")
+    print(f"Crash Kernel: {crash_kernel_size / unit_factor:.2f} {unit_name}")
 
 # Function to parse and display memory ranges
-def parse_iomem(file_path, reserved_only):
+def parse_iomem(file_path, reserved_only, unit_factor, unit_name, total_factor, total_name):
 
     hierarchy = []  # Stack to keep track of the hierarchy
     total_reserved_size = 0  # Variable to track total reserved memory
@@ -86,10 +88,10 @@ def parse_iomem(file_path, reserved_only):
                         start_parent = int(match_parent.group(1), 16)
                         end_parent = int(match_parent.group(2), 16)
                         size_parent = (end_parent - start_parent + 1)
-                        print(f"{parent.rstrip()}\t {size_parent} ({size_parent / (2**20):.2f} MiB)")
+                        print(f"{parent.rstrip()}\t {size_parent} ({size_parent / unit_factor:.2f} {unit_name})")
 
             # Print the current Reserved line
-            print(f"{line.rstrip()}\t {size} ({size / (2**20):.2f} MiB)")
+            print(f"{line.rstrip()}\t {size} ({size / unit_factor:.2f} {unit_name})")
 
             # Check if text line is a child (if it exists and is indented)
             if i + 1 < len(lines):
@@ -103,7 +105,7 @@ def parse_iomem(file_path, reserved_only):
                         size_child = (end_child - start_child + 1)
                         if "reserved" in next_line.lower():
                             total_reserved_size += size_child  # Add child reserved size to total
-                        print(f"{next_line.rstrip()}\t {size_child} ({size_child / (2**20):.2f} MiB)")
+                        print(f"{next_line.rstrip()}\t {size_child} ({size_child / unit_factor:.2f} {unit_name})")
 
         # Exclude lines that don't contain 'Reserved' (case-insensitive) and do not cause an indentation change
         elif "reserved" not in line.lower():
@@ -115,10 +117,10 @@ def parse_iomem(file_path, reserved_only):
                 continue  # Skip this line if it's not changing indentation and doesn't contain 'Reserved'
 
     # Print the total reserved memory size at the end
-    print(f"\nTotal reserved memory: {total_reserved_size} bytes ({total_reserved_size / (2**30):.2f} GiB)")
+    print(f"\nTotal reserved memory: {total_reserved_size} bytes ({total_reserved_size / total_factor:.2f} {total_name})")
 
 # Function to handle other options
-def parse_full_iomem(file_path, top_level_only, search_keyword=None):
+def parse_full_iomem(file_path, top_level_only, unit_factor, unit_name, total_factor, total_name, search_keyword=None):
     total_size = 0  # Variable to keep track of total memory size
     size = None  # Declare size here to avoid UnboundLocalError
 
@@ -150,30 +152,36 @@ def parse_full_iomem(file_path, top_level_only, search_keyword=None):
             total_size += size  # Add to total size
 
             # Print the current line with calculated size
-            print(f"{line.rstrip()}\t {size} ({size / (2**20):.2f} MiB)")
+            print(f"{line.rstrip()}\t {size} ({size / unit_factor:.2f} {unit_name})")
 
     # Print the total memory size at the end
-    print(f"\nTotal memory: {total_size} bytes ({total_size / (2**30):.2f} GiB)")
+    print(f"\nTotal memory: {total_size} bytes ({total_size / total_factor:.2f} {total_name})")
 
 # Main function to handle command-line arguments
 def main():
-    parser = argparse.ArgumentParser(description="Parse /proc/iomem-like file")
     parser = argparse.ArgumentParser(description="Parse /proc/iomem-like file and display memory region details.")
     parser.add_argument('file', type=str, help='The file to parse (e.g., /proc/iomem)')
     parser.add_argument('-r', action='store_true', help='Show lines related to Reserved memory with their hierarchy')
     parser.add_argument('-t', action='store_true', help='Show only top-level memory regions (no indentation)')
     parser.add_argument('-s', type=str, help='Show only memory regions matching the provided keyword (case-insensitive)')
     parser.add_argument('-i', action='store_true', help='Show summary statistics for System RAM, Reserved Memory, and Device Regions')
+    unit = parser.add_mutually_exclusive_group()
+    for key, (factor, name) in UNITS.items():
+        unit.add_argument(f'-{key}', dest='unit', action='store_const', const=key,
+                          help=f'Display sizes in {name}')
 
     args = parser.parse_args()
+    unit_factor, unit_name = UNITS[args.unit or 'M']
+    total_factor, total_name = UNITS[args.unit or 'G']
+    stats_name = unit_name if args.unit else 'MB'
 
     # Call the appropriate function based on the options
     if args.i:
-        show_statistics(args.file)
+        show_statistics(args.file, unit_factor, stats_name)
     elif args.r:
-        parse_iomem(args.file, args.r)
+        parse_iomem(args.file, args.r, unit_factor, unit_name, total_factor, total_name)
     else:
-        parse_full_iomem(args.file, args.t, args.s)
+        parse_full_iomem(args.file, args.t, unit_factor, unit_name, total_factor, total_name, args.s)
 
 if __name__ == "__main__":
     main()
