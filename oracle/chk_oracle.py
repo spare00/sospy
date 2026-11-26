@@ -299,6 +299,7 @@ class Host:
     shm_source: str | None = None
     users: dict[str, UserRec] = field(default_factory=dict)
     groups: dict[str, GroupRec] = field(default_factory=dict)
+    group_file_available: bool = True
     oratab: list[tuple[str, str, str]] = field(default_factory=list)
     tuned: str | None = None
     tuned_src: str | None = None
@@ -1251,7 +1252,8 @@ def load_shm(root: str, pagesize: int, uid_to_name: dict[int, str]) -> tuple[lis
 
 def load_host(root: str, pagesize: int) -> Host:
     users = parse_passwd(read_text(join_root(root, "etc/passwd")) or "")
-    groups = parse_group(read_text(join_root(root, "etc/group")) or "")
+    group_text = read_text(join_root(root, "etc/group"))
+    groups = parse_group(group_text or "")
     oratab_text = read_text(join_root(root, "etc/oratab"))
     oratab = parse_oratab(oratab_text) if oratab_text else []
     uid_to_name = {user.uid: user.name for user in users.values()}
@@ -1282,6 +1284,7 @@ def load_host(root: str, pagesize: int) -> Host:
         shm_source=shm_source,
         users=users,
         groups=groups,
+        group_file_available=group_text is not None,
         oratab=oratab,
         tuned=tuned,
         tuned_src=tuned_src,
@@ -2609,14 +2612,18 @@ def check_hugetlb_group(host: Host, add) -> None:
             f"0 ({src}); set this to the dba or oinstall gid so the Oracle user can allocate HugePages",
         )
         return
+    users = target_limit_users(host)
+    outsiders = [user for user in users if gid not in user_gids(host, user)]
     names = group_names_for_gid(host, gid)
-    label = ",".join(names) if names else "group name not in etc/group"
-    outsiders = []
-    for user in target_limit_users(host):
-        if gid not in user_gids(host, user):
-            outsiders.append(user)
+    if host.group_file_available:
+        label = ",".join(names) if names else "group name not in etc/group"
+    else:
+        label = "etc/group unavailable"
     detail = f"{gid} ({label}) ({src}){persistent_note(host, 'vm.hugetlb_shm_group')}"
-    if outsiders:
+    if not host.group_file_available and (outsiders or not users):
+        unverified = f" for {', '.join(outsiders)}" if outsiders else ""
+        add(section, "INFO", "vm.hugetlb_shm_group", f"{detail}; membership could not be verified{unverified}")
+    elif outsiders:
         add(section, "WARN", "vm.hugetlb_shm_group", f"{detail}; not a group of: {', '.join(outsiders)}")
     else:
         add(section, "PASS", "vm.hugetlb_shm_group", detail)
